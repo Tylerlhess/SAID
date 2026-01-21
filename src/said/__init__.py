@@ -44,6 +44,13 @@ from said.validator import (
 )
 from said.orchestrator import AnsibleOrchestrator, OrchestratorError
 from said.coordinator import CoordinatorError, WorkflowCoordinator
+from said.builder import (
+    BuilderError,
+    analyze_ansible_playbook,
+    analyze_ansible_task,
+    build_dependency_map_from_directory,
+    build_dependency_map_from_playbooks,
+)
 
 __all__ = [
     "__version__",
@@ -92,4 +99,10 @@ __all__ = [
     # Coordinator
     "WorkflowCoordinator",
     "CoordinatorError",
+    # Builder
+    "BuilderError",
+    "analyze_ansible_playbook",
+    "analyze_ansible_task",
+    "build_dependency_map_from_directory",
+    "build_dependency_map_from_playbooks",
 ]

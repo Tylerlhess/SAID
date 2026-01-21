@@ -86,6 +86,19 @@ said execute --full-deploy
 said validate
 ```
 
+### 5. Auto-Generate Dependency Map (NEW!)
+
+```bash
+# Automatically build dependency map from playbooks
+said build --directory ./playbooks
+
+# Or specify individual playbooks
+said build --playbook site.yml --playbook roles/web/tasks/main.yml
+
+# Custom output location
+said build --directory ./ansible --output custom_map.yml
+```
+
 ## CLI Commands
 
 ### `said analyze`
@@ -122,6 +135,22 @@ Validate dependency map and required variables.
 - `--dependency-map, -d`: Path to dependency_map.yml
 - `--inventory, -i`: Path to Ansible inventory file
 - `--variables, -v`: Path to YAML file containing variables
+
+### `said build`
+
+Automatically generate dependency map from Ansible playbooks.
+
+This command analyzes your Ansible playbooks and automatically infers:
+- Task names from playbook tasks
+- Watch files from template/copy/file tasks
+- Required variables from variable references
+- Dependencies from task relationships
+
+**Options:**
+- `--playbook, -p`: Path to Ansible playbook file(s). Can be specified multiple times.
+- `--directory, -d`: Path to directory containing Ansible playbooks
+- `--output, -o`: Output path for generated dependency map (default: dependency_map.yml)
+- `--overwrite`: Overwrite existing dependency_map.yml if it exists
 
 ## Dependency Map Format
 

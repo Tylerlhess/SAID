@@ -440,6 +440,105 @@ def validate(
         sys.exit(1)
 
 
+@cli.command()
+@click.option(
+    "--playbook",
+    "-p",
+    type=click.Path(exists=True, path_type=Path),
+    multiple=True,
+    help="Path to Ansible playbook file(s). Can be specified multiple times.",
+)
+@click.option(
+    "--directory",
+    "-d",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to directory containing Ansible playbooks. Analyzes all .yml/.yaml files.",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    default="dependency_map.yml",
+    help="Output path for generated dependency map. Defaults to dependency_map.yml.",
+)
+@click.option(
+    "--overwrite",
+    is_flag=True,
+    help="Overwrite existing dependency_map.yml if it exists.",
+)
+def build(
+    playbook: tuple,
+    directory: Optional[Path],
+    output: Path,
+    overwrite: bool,
+):
+    """Automatically build dependency map from Ansible playbooks.
+
+    This command analyzes Ansible playbooks and automatically generates a
+    dependency_map.yml file by inferring:
+    - Task names from playbook tasks
+    - Watch files from template/copy/file tasks
+    - Required variables from variable references
+    - Dependencies from task relationships
+
+    Example:
+        said build --directory ./playbooks --output dependency_map.yml
+        said build --playbook site.yml --playbook roles/web/tasks/main.yml
+    """
+    try:
+        from said.builder import (
+            BuilderError,
+            build_dependency_map_from_directory,
+            build_dependency_map_from_playbooks,
+        )
+
+        playbook_paths = list(playbook) if playbook else []
+
+        # Check if output file exists
+        if output.exists() and not overwrite:
+            if not click.confirm(
+                f"File {output} already exists. Overwrite?",
+                default=False,
+            ):
+                click.echo("Cancelled.")
+                return
+
+        # Build from directory or playbooks
+        if directory:
+            if playbook_paths:
+                click.echo(
+                    "Warning: Both --directory and --playbook specified. Using directory.",
+                    err=True,
+                )
+            click.echo(f"Analyzing playbooks in {directory}...")
+            dep_map = build_dependency_map_from_directory(directory, output)
+        elif playbook_paths:
+            click.echo(f"Analyzing {len(playbook_paths)} playbook(s)...")
+            dep_map = build_dependency_map_from_playbooks(playbook_paths, output)
+        else:
+            click.echo(
+                "Error: Must specify either --directory or --playbook",
+                err=True,
+            )
+            sys.exit(1)
+
+        click.echo(f"\n✓ Generated dependency map with {len(dep_map.tasks)} tasks")
+        click.echo(f"✓ Written to {output}")
+
+        click.echo("\n📝 Next steps:")
+        click.echo("  1. Review the generated dependency_map.yml")
+        click.echo("  2. Add/edit watch_files, depends_on, triggers as needed")
+        click.echo("  3. Verify required variables are correct")
+        click.echo("  4. Run 'said validate' to check the dependency map")
+
+    except BuilderError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Unexpected error: {e}", err=True)
+        sys.exit(1)
+
+
 def main():
     """Main entry point for SAID CLI."""
     cli()
