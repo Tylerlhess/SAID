@@ -63,32 +63,69 @@ def analyze_ansible_task(task: Dict, playbook_path: Path) -> Optional[Dict]:
     # Infer watch_files from task actions
     watch_files = set()
 
-    # Template tasks
-    if "template" in task:
-        src = task["template"].get("src") if isinstance(task["template"], dict) else task["template"]
-        if src:
-            watch_files.add(str(playbook_path.parent / src))
-            watch_files.add(f"templates/{Path(src).name}")
-
-    # Copy tasks
-    if "copy" in task:
-        copy_dict = task["copy"]
-        if isinstance(copy_dict, dict):
-            src = copy_dict.get("src")
-            dest = copy_dict.get("dest")
+    # Template tasks (handle both "template" and "ansible.builtin.template")
+    for template_key in ["template", "ansible.builtin.template", "ansible.legacy.template"]:
+        if template_key in task:
+            template_dict = task[template_key]
+            if isinstance(template_dict, dict):
+                src = template_dict.get("src")
+            else:
+                src = template_dict
             if src:
                 watch_files.add(str(playbook_path.parent / src))
-            if dest:
-                watch_files.add(dest)
-        else:
-            # Simple string format
-            watch_files.add(str(playbook_path.parent / copy_dict))
+                watch_files.add(f"templates/{Path(src).name}")
+            break
 
-    # File tasks
-    if "file" in task:
-        path = task["file"].get("path") if isinstance(task["file"], dict) else task["file"]
-        if path:
-            watch_files.add(path)
+    # Copy tasks (handle both "copy" and "ansible.builtin.copy")
+    for copy_key in ["copy", "ansible.builtin.copy", "ansible.legacy.copy"]:
+        if copy_key in task:
+            copy_dict = task[copy_key]
+            if isinstance(copy_dict, dict):
+                src = copy_dict.get("src")
+                dest = copy_dict.get("dest")
+                if src:
+                    watch_files.add(str(playbook_path.parent / src))
+                if dest:
+                    watch_files.add(dest)
+            else:
+                # Simple string format
+                watch_files.add(str(playbook_path.parent / copy_dict))
+            break
+
+    # File tasks (handle both "file" and "ansible.builtin.file")
+    for file_key in ["file", "ansible.builtin.file", "ansible.legacy.file"]:
+        if file_key in task:
+            file_dict = task[file_key]
+            if isinstance(file_dict, dict):
+                path = file_dict.get("path") or file_dict.get("dest")
+            else:
+                path = file_dict
+            if path:
+                watch_files.add(path)
+            break
+
+    # Stat tasks (check for file paths)
+    for stat_key in ["stat", "ansible.builtin.stat", "ansible.legacy.stat"]:
+        if stat_key in task:
+            stat_dict = task[stat_key]
+            if isinstance(stat_dict, dict):
+                path = stat_dict.get("path")
+                if path:
+                    watch_files.add(path)
+            break
+
+    # Find tasks (check for search paths)
+    for find_key in ["find", "ansible.builtin.find", "ansible.legacy.find"]:
+        if find_key in task:
+            find_dict = task[find_key]
+            if isinstance(find_dict, dict):
+                paths = find_dict.get("paths")
+                if paths:
+                    if isinstance(paths, list):
+                        watch_files.update(paths)
+                    else:
+                        watch_files.add(paths)
+            break
 
     # Include/import tasks
     if "include_tasks" in task:
@@ -401,14 +438,73 @@ def analyze_ansible_playbook(
     if content is None:
         return []
 
-    # Handle both single playbook and list of playbooks
+    all_tasks = []
+
+    # Check if this is a role task file (list of tasks) or a playbook (dict with tasks/hosts/etc)
     if isinstance(content, list):
-        plays = content
+        # Could be a list of plays OR a list of tasks (role task file)
+        # Check first item to determine
+        if content and isinstance(content[0], dict):
+            # Check if first item looks like a play (has hosts/tasks) or a task (has name/action/module)
+            first_item = content[0]
+            if "hosts" in first_item or "tasks" in first_item or "roles" in first_item:
+                # It's a list of plays
+                plays = content
+            else:
+                # It's a list of tasks (role task file)
+                tasks = content
+                # Process tasks directly (skip the play loop)
+                for task in tasks:
+                    if isinstance(task, dict):
+                        # Handle include_tasks / import_tasks in role task files
+                        if "include_tasks" in task or "import_tasks" in task:
+                            include_path_str = task.get("include_tasks") or task.get("import_tasks")
+                            if include_path_str:
+                                included_path = resolve_playbook_path(include_path_str, playbook_path)
+                                if included_path:
+                                    try:
+                                        include_prefix = included_path.stem
+                                        included_tasks = analyze_ansible_playbook(included_path, visited, source_prefix=include_prefix)
+                                        all_tasks.extend(included_tasks)
+                                    except BuilderError:
+                                        # If include fails, analyze task as-is
+                                        task_meta = analyze_ansible_task(task, playbook_path)
+                                        if task_meta:
+                                            if source_prefix and not task_meta["name"].startswith(f"{source_prefix}_"):
+                                                task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
+                                            all_tasks.append(task_meta)
+                                else:
+                                    # Include path not found, analyze task as-is
+                                    task_meta = analyze_ansible_task(task, playbook_path)
+                                    if task_meta:
+                                        if source_prefix and not task_meta["name"].startswith(f"{source_prefix}_"):
+                                            task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
+                                        all_tasks.append(task_meta)
+                            else:
+                                task_meta = analyze_ansible_task(task, playbook_path)
+                                if task_meta:
+                                    if source_prefix and not task_meta["name"].startswith(f"{source_prefix}_"):
+                                        task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
+                                    all_tasks.append(task_meta)
+                        else:
+                            # Regular task
+                            task_meta = analyze_ansible_task(task, playbook_path)
+                            if task_meta:
+                                if source_prefix and not task_meta["name"].startswith(f"{source_prefix}_"):
+                                    task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
+                                all_tasks.append(task_meta)
+                
+                # Infer dependencies
+                if all_tasks and tasks:
+                    infer_dependencies_from_playbook(all_tasks, tasks)
+                
+                return all_tasks
+        else:
+            plays = content
     else:
         plays = [content]
 
-    all_tasks = []
-
+    # Process playbook structure (has plays with tasks/handlers)
     for play in plays:
         if not isinstance(play, dict):
             continue
