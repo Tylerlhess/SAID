@@ -6,6 +6,7 @@ inline metadata within Ansible playbooks.
 """
 
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
@@ -59,14 +60,37 @@ def parse_yaml_file(file_path: Union[str, Path]) -> Dict:
     return content
 
 
-def parse_dependency_map(file_path: Union[str, Path]) -> DependencyMap:
+# Cache for parsed dependency maps (keyed by file path and mtime)
+_dependency_map_cache: Dict[tuple, DependencyMap] = {}
+
+
+def _get_cache_key(file_path: Path) -> tuple:
+    """Generate cache key from file path and modification time.
+
+    Args:
+        file_path: Path to the file.
+
+    Returns:
+        Tuple of (absolute_path, mtime) for use as cache key.
+    """
+    try:
+        stat = file_path.stat()
+        return (str(file_path.resolve()), stat.st_mtime)
+    except OSError:
+        # If we can't stat the file, use path only (no caching)
+        return (str(file_path.resolve()), None)
+
+
+def parse_dependency_map(file_path: Union[str, Path], use_cache: bool = True) -> DependencyMap:
     """Parse a dependency_map.yml file and return a validated DependencyMap.
 
     This function handles standalone manifest files that contain a 'tasks' key
-    with a list of task metadata definitions.
+    with a list of task metadata definitions. Results are cached based on file
+    path and modification time for performance.
 
     Args:
         file_path: Path to the dependency_map.yml file.
+        use_cache: If True, use caching for parsed maps. Defaults to True.
 
     Returns:
         Validated DependencyMap instance.
@@ -75,6 +99,14 @@ def parse_dependency_map(file_path: Union[str, Path]) -> DependencyMap:
         ParserError: If the file cannot be parsed or is invalid.
         SchemaError: If the dependency map structure is invalid.
     """
+    file_path = Path(file_path)
+    
+    # Check cache if enabled
+    if use_cache:
+        cache_key = _get_cache_key(file_path)
+        if cache_key[1] is not None and cache_key in _dependency_map_cache:
+            return _dependency_map_cache[cache_key]
+    
     try:
         data = parse_yaml_file(file_path)
 
@@ -86,7 +118,18 @@ def parse_dependency_map(file_path: Union[str, Path]) -> DependencyMap:
 
         # Validate and create DependencyMap
         try:
-            return validate_dependency_map(data)
+            dependency_map = validate_dependency_map(data)
+            
+            # Cache the result if enabled
+            if use_cache and cache_key[1] is not None:
+                _dependency_map_cache[cache_key] = dependency_map
+                # Limit cache size to prevent memory issues
+                if len(_dependency_map_cache) > 100:
+                    # Remove oldest entries (simple FIFO)
+                    oldest_key = next(iter(_dependency_map_cache))
+                    del _dependency_map_cache[oldest_key]
+            
+            return dependency_map
         except SchemaError as e:
             # Wrap SchemaError in ParserError for consistency
             raise ParserError(f"Invalid dependency map structure: {e}")
@@ -95,6 +138,14 @@ def parse_dependency_map(file_path: Union[str, Path]) -> DependencyMap:
         raise
     except Exception as e:
         raise ParserError(f"Unexpected error parsing dependency map: {e}")
+
+
+def clear_dependency_map_cache():
+    """Clear the dependency map cache.
+
+    Useful for testing or when you want to force re-parsing of files.
+    """
+    _dependency_map_cache.clear()
 
 
 def parse_inline_metadata(playbook_content: str) -> List[Dict]:
@@ -201,6 +252,7 @@ def parse_playbook_directory(directory: Union[str, Path]) -> DependencyMap:
 
 def discover_dependency_map(
     start_path: Optional[Union[str, Path]] = None,
+    search_multiple: bool = False,
 ) -> Optional[DependencyMap]:
     """Auto-discover dependency_map.yml in common locations.
 
@@ -211,9 +263,12 @@ def discover_dependency_map(
 
     Args:
         start_path: Starting path for discovery. Defaults to current working directory.
+        search_multiple: If True, search for multiple dependency map files and merge them.
+                        Defaults to False (returns first found).
 
     Returns:
-        DependencyMap if found, None otherwise.
+        DependencyMap if found, None otherwise. If search_multiple is True and multiple
+        files are found, returns a merged DependencyMap.
 
     Raises:
         ParserError: If a file is found but cannot be parsed.
@@ -226,7 +281,7 @@ def discover_dependency_map(
     # Common filenames
     filenames = ["dependency_map.yml", "dependency_map.yaml"]
 
-    # Search locations
+    # Search locations (ordered by priority)
     search_paths = [
         start_path,
         start_path / "ansible",
@@ -236,6 +291,8 @@ def discover_dependency_map(
         start_path.parent.parent.parent,
     ]
 
+    found_maps = []
+    
     for search_path in search_paths:
         if not search_path.exists():
             continue
@@ -244,11 +301,58 @@ def discover_dependency_map(
             candidate = search_path / filename
             if candidate.exists() and candidate.is_file():
                 try:
-                    return parse_dependency_map(candidate)
+                    dep_map = parse_dependency_map(candidate)
+                    found_maps.append((candidate, dep_map))
+                    
+                    # If not searching for multiple, return first found
+                    if not search_multiple:
+                        return dep_map
                 except (ParserError, SchemaError) as e:
                     # If file exists but is invalid, raise error
                     raise ParserError(
                         f"Found dependency map at {candidate} but it is invalid: {e}"
                     )
 
+    # If searching for multiple, merge all found maps
+    if search_multiple and found_maps:
+        return _merge_dependency_maps([dep_map for _, dep_map in found_maps])
+    
     return None
+
+
+def _merge_dependency_maps(maps: List[DependencyMap]) -> DependencyMap:
+    """Merge multiple dependency maps into one.
+
+    Tasks with the same name will be deduplicated (first occurrence wins).
+    All tasks from all maps are combined.
+
+    Args:
+        maps: List of DependencyMap instances to merge.
+
+    Returns:
+        Merged DependencyMap instance.
+
+    Raises:
+        ParserError: If merging fails or creates invalid structure.
+    """
+    if not maps:
+        raise ParserError("Cannot merge empty list of dependency maps")
+    
+    if len(maps) == 1:
+        return maps[0]
+    
+    # Collect all tasks, deduplicating by name
+    seen_names = set()
+    merged_tasks = []
+    
+    for dep_map in maps:
+        for task in dep_map.tasks:
+            if task.name not in seen_names:
+                merged_tasks.append(task)
+                seen_names.add(task.name)
+    
+    # Create merged map
+    try:
+        return validate_dependency_map({"tasks": [task.__dict__ for task in merged_tasks]})
+    except SchemaError as e:
+        raise ParserError(f"Failed to merge dependency maps: {e}")

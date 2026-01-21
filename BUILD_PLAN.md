@@ -149,87 +149,162 @@ This plan breaks down the SAID project into small, incremental tasks suitable fo
 - **Deliverable**: State tracking in workflow
 - **Commit**: "feat: integrate state store into deployment workflow" ✅
 
-## Phase 4: Advanced Features (Tasks 16-20)
+## Phase 4: Advanced Features & Git Integration (Tasks 16-25)
 
-### Task 16: Flat-File Fast-Track
-- [ ] Create `src/said/fasttrack.py`
-- [ ] Detect if changes are only non-binary config files
-- [ ] Implement logic to skip service restarts unless required
-- [ ] Integrate with dependency resolver
+### Task 16: Enhanced Git Integration
+- [ ] Extend `src/said/git_detector.py` with additional methods:
+  - [ ] `get_commit_message()` - Extract commit message for context
+  - [ ] `get_commit_author()` - Get commit author information
+  - [ ] `get_file_diff()` - Get actual diff content for changed files
+  - [ ] `get_branch_name()` - Get current branch name
+  - [ ] `is_merge_commit()` - Detect merge commits
+  - [ ] `get_commit_range()` - Get all commits in a range
+- [ ] Add support for git tags as commit references
+- [ ] Add support for relative commit references (HEAD~1, HEAD~2, etc.)
+- [ ] Write unit tests for new git methods
+- **Deliverable**: Enhanced git detection capabilities
+- **Commit**: "feat: enhance git detector with commit metadata and range support"
+
+### Task 17: Git Branch & PR Support
+- [ ] Create `src/said/git_branch.py` module
+- [ ] Implement branch comparison (compare current branch to base branch)
+- [ ] Add support for PR/MR workflows (detect base branch automatically)
+- [ ] Implement `get_changed_files_between_branches()` method
+- [ ] Add CLI option `--base-branch` for branch comparisons
 - [ ] Write unit tests
-- **Deliverable**: Fast-track optimization
+- **Deliverable**: Branch and PR workflow support
+- **Commit**: "feat: add git branch and PR comparison support"
+
+### Task 18: Git Hooks Integration
+- [ ] Create `src/said/git_hooks.py` module
+- [ ] Implement pre-commit hook generator (validate dependency map before commit)
+- [ ] Implement post-commit hook generator (auto-update state store on successful deploy)
+- [ ] Add CLI command `said hooks install` to set up hooks
+- [ ] Add CLI command `said hooks uninstall` to remove hooks
+- [ ] Create hook templates in `templates/git_hooks/`
+- [ ] Write unit tests
+- **Deliverable**: Git hooks for automated validation and state tracking
+- **Commit**: "feat: implement git hooks integration for pre/post-commit automation"
+
+### Task 19: Git Submodule Support
+- [ ] Extend `GitDetector` to detect submodule changes
+- [ ] Add `get_submodule_changes()` method to detect submodule commit updates
+- [ ] Handle submodule paths in file matching logic
+- [ ] Add support for nested submodules
+- [ ] Update coordinator to handle submodule changes appropriately
+- [ ] Write unit tests
+- **Deliverable**: Git submodule change detection
+- **Commit**: "feat: add git submodule change detection support"
+
+### Task 20: Git History Analysis
+- [ ] Create `src/said/git_history.py` module
+- [ ] Implement `analyze_change_frequency()` - Track which files change most often
+- [ ] Implement `get_related_commits()` - Find commits that touched similar files
+- [ ] Add `suggest_dependency_updates()` - Suggest dependency map improvements based on history
+- [ ] Integrate with coordinator for smarter change detection
+- [ ] Write unit tests
+- **Deliverable**: Git history analysis for optimization
+- **Commit**: "feat: add git history analysis for change pattern detection"
+
+### Task 21: Flat-File Fast-Track
+- [ ] Create `src/said/fasttrack.py`
+- [ ] Implement `is_config_file_only_change()` - Detect if changes are only non-binary config files
+- [ ] Implement `should_skip_service_restart()` - Logic to skip service restarts unless required
+- [ ] Add file type detection (binary vs text, config vs code)
+- [ ] Integrate with dependency resolver to respect fast-track rules
+- [ ] Add CLI option `--fast-track` to enable optimization
+- [ ] Write unit tests
+- **Deliverable**: Fast-track optimization for config-only changes
 - **Commit**: "feat: implement flat-file fast-track optimization"
 
-### Task 17: Logging & Observability
-- [ ] Set up structured logging (use `logging` module)
-- [ ] Add log levels and formatting
-- [ ] Log: changed files, matched tasks, resolved dependencies, execution plan
-- [ ] Create log output file option
-- **Deliverable**: Comprehensive logging
+### Task 22: Logging & Observability
+- [ ] Enhance logging in `src/said/coordinator.py` and other modules
+- [ ] Set up structured logging with JSON output option
+- [ ] Add log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
+- [ ] Log key events: changed files, matched tasks, resolved dependencies, execution plan, git operations
+- [ ] Add `--log-file` CLI option for log output
+- [ ] Add `--log-level` CLI option for verbosity control
+- [ ] Create log formatter with timestamps and context
+- [ ] Write unit tests for logging
+- **Deliverable**: Comprehensive structured logging
 - **Commit**: "feat: add structured logging and observability"
 
-### Task 18: Error Handling & Recovery
-- [ ] Add try-catch blocks throughout
-- [ ] Implement graceful error messages
-- [ ] Add rollback suggestions on failure
-- [ ] Handle edge cases (empty diffs, missing files, etc.)
-- **Deliverable**: Robust error handling
+### Task 23: Error Handling & Recovery
+- [ ] Review and enhance error handling throughout codebase
+- [ ] Add try-catch blocks in critical paths with specific exception types
+- [ ] Implement graceful error messages with actionable suggestions
+- [ ] Add rollback suggestions on failure (suggest previous successful commit)
+- [ ] Handle edge cases: empty diffs, missing files, invalid commits, corrupted state store
+- [ ] Add `--continue-on-error` option for partial deployments
+- [ ] Create error recovery strategies for common failure modes
+- [ ] Write unit tests for error scenarios
+- **Deliverable**: Robust error handling and recovery mechanisms
 - **Commit**: "feat: improve error handling and recovery"
 
-### Task 19: Example Playbooks & Documentation
-- [ ] Create `examples/simple_playbook/` with sample Ansible structure
-- [ ] Create example `dependency_map.yml`
-- [ ] Create `docs/USAGE.md` with usage examples
-- [ ] Create `docs/ARCHITECTURE.md` explaining design decisions
-- **Deliverable**: Examples and documentation
-- **Commit**: "docs: add examples and usage documentation"
+### Task 24: Example Playbooks & Documentation
+- [ ] Create `examples/simple_playbook/` directory structure
+- [ ] Create sample Ansible playbook with roles and tasks
+- [ ] Create example `dependency_map.yml` with comprehensive metadata
+- [ ] Create `examples/complex_playbook/` with advanced dependency scenarios
+- [ ] Create `docs/USAGE.md` with usage examples and common workflows
+- [ ] Create `docs/ARCHITECTURE.md` explaining design decisions and component interactions
+- [ ] Create `docs/GIT_INTEGRATION.md` documenting git features and workflows
+- [ ] Add inline code examples and diagrams
+- **Deliverable**: Comprehensive examples and documentation
+- **Commit**: "docs: add examples and comprehensive usage documentation"
 
-### Task 20: Integration Tests
+### Task 25: Integration Tests
 - [ ] Create `tests/integration/` directory
-- [ ] Write end-to-end test with mock Ansible playbook
+- [ ] Create `tests/integration/fixtures/` with sample git repos and playbooks
+- [ ] Write `test_full_workflow.py` - End-to-end test with mock Ansible playbook
+- [ ] Write `test_git_integration.py` - Test git operations and workflows
+- [ ] Write `test_branch_comparison.py` - Test branch and PR comparison features
+- [ ] Write `test_error_scenarios.py` - Test error handling and edge cases
 - [ ] Test full workflow: git diff → dependency resolution → command generation
-- [ ] Test edge cases and error scenarios
-- **Deliverable**: Integration test suite
-- **Commit**: "test: add integration tests for full workflow"
+- [ ] Test git hooks installation and execution
+- [ ] Test submodule change detection
+- [ ] Add CI/CD integration test configuration
+- **Deliverable**: Comprehensive integration test suite
+- **Commit**: "test: add comprehensive integration tests for full workflow"
 
-## Phase 5: Polish & Production Readiness (Tasks 21-25)
+## Phase 5: Polish & Production Readiness (Tasks 26-30)
 
-### Task 21: Performance Optimization
-- [ ] Profile dependency resolution for large playbooks
-- [ ] Optimize file matching algorithm if needed
-- [ ] Add caching for parsed dependency maps
-- [ ] Benchmark and document performance
+### Task 26: Performance Optimization
+- [x] Profile dependency resolution for large playbooks
+- [x] Optimize file matching algorithm if needed
+- [x] Add caching for parsed dependency maps
+- [x] Benchmark and document performance
 - **Deliverable**: Optimized performance
-- **Commit**: "perf: optimize dependency resolution and file matching"
+- **Commit**: "perf: optimize dependency resolution and file matching" ✅
 
-### Task 22: Configuration File Discovery
-- [ ] Auto-discover `dependency_map.yml` in common locations
-- [ ] Support multiple dependency map files
-- [ ] Add config file validation
+### Task 27: Configuration File Discovery
+- [x] Auto-discover `dependency_map.yml` in common locations
+- [x] Support multiple dependency map files
+- [x] Add config file validation
 - **Deliverable**: Flexible configuration discovery
-- **Commit**: "feat: add automatic dependency map discovery"
+- **Commit**: "feat: add automatic dependency map discovery" ✅
 
-### Task 23: Output Formatting
-- [ ] Create human-readable execution plan output
-- [ ] Add JSON output option for CI/CD integration
-- [ ] Format variable validation results clearly
+### Task 28: Output Formatting
+- [x] Create human-readable execution plan output
+- [x] Add JSON output option for CI/CD integration
+- [x] Format variable validation results clearly
 - **Deliverable**: Improved output formats
-- **Commit**: "feat: improve output formatting and add JSON mode"
+- **Commit**: "feat: improve output formatting and add JSON mode" ✅
 
-### Task 24: Unit Test Coverage
-- [ ] Achieve >80% code coverage
-- [ ] Add tests for all edge cases
-- [ ] Use pytest fixtures for common test data
+### Task 29: Unit Test Coverage
+- [x] Achieve >80% code coverage
+- [x] Add tests for all edge cases
+- [x] Use pytest fixtures for common test data
 - **Deliverable**: Comprehensive test coverage
-- **Commit**: "test: achieve >80% code coverage"
+- **Commit**: "test: achieve >80% code coverage" ✅
 
-### Task 25: Final Documentation
-- [ ] Complete README.md with installation and quick start
-- [ ] Add API documentation (docstrings)
-- [ ] Create CHANGELOG.md
-- [ ] Add CONTRIBUTING.md if needed
+### Task 30: Final Documentation
+- [x] Complete README.md with installation and quick start
+- [x] Add API documentation (docstrings)
+- [x] Create CHANGELOG.md
+- [x] Add CONTRIBUTING.md if needed
 - **Deliverable**: Complete documentation
-- **Commit**: "docs: complete project documentation"
+- **Commit**: "docs: complete project documentation" ✅
 
 ## Development Workflow
 

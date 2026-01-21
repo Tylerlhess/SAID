@@ -5,7 +5,7 @@ based on resolved task dependencies.
 """
 
 import shlex
-from typing import List, Optional
+from typing import Dict, List, Optional, Set
 
 
 class OrchestratorError(Exception):
@@ -96,30 +96,89 @@ class AnsibleOrchestrator:
         return " ".join(shlex.quote(arg) for arg in cmd)
 
     def format_execution_plan(
-        self, task_names: List[str], changed_files: Optional[List[str]] = None
+        self,
+        task_names: List[str],
+        changed_files: Optional[List[str]] = None,
+        matched_tasks: Optional[Set[str]] = None,
+        command_string: Optional[str] = None,
     ) -> str:
         """Format a human-readable execution plan.
 
         Args:
             task_names: List of task names in execution order.
             changed_files: Optional list of changed files that triggered these tasks.
+            matched_tasks: Optional set of initially matched task names.
+            command_string: Optional Ansible command string to display.
 
         Returns:
             Formatted string describing the execution plan.
         """
         lines = []
-        lines.append("=" * 60)
+        lines.append("=" * 70)
         lines.append("SAID Execution Plan")
-        lines.append("=" * 60)
+        lines.append("=" * 70)
 
         if changed_files:
-            lines.append("\nChanged Files:")
-            for file_path in changed_files:
-                lines.append(f"  - {file_path}")
+            lines.append("\n📝 Changed Files:")
+            for file_path in sorted(changed_files):
+                lines.append(f"   • {file_path}")
 
-        lines.append(f"\nTasks to Execute ({len(task_names)}):")
-        for i, task_name in enumerate(task_names, start=1):
-            lines.append(f"  {i}. {task_name}")
+        if matched_tasks and matched_tasks != set(task_names):
+            lines.append(f"\n🎯 Initially Matched Tasks ({len(matched_tasks)}):")
+            for task_name in sorted(matched_tasks):
+                lines.append(f"   • {task_name}")
 
-        lines.append("\n" + "=" * 60)
+        if task_names:
+            lines.append(f"\n⚙️  Tasks to Execute ({len(task_names)}):")
+            for i, task_name in enumerate(task_names, start=1):
+                marker = "→" if task_name in (matched_tasks or set()) else " "
+                lines.append(f"   {i:2d}. {marker} {task_name}")
+
+        if command_string:
+            lines.append("\n📋 Generated Ansible Command:")
+            lines.append(f"   {command_string}")
+
+        lines.append("\n" + "=" * 70)
         return "\n".join(lines)
+
+    def format_json_output(
+        self,
+        task_names: List[str],
+        changed_files: Optional[List[str]] = None,
+        matched_tasks: Optional[Set[str]] = None,
+        command: Optional[List[str]] = None,
+        command_string: Optional[str] = None,
+    ) -> Dict:
+        """Format execution plan as a JSON-serializable dictionary.
+
+        Args:
+            task_names: List of task names in execution order.
+            changed_files: Optional list of changed files.
+            matched_tasks: Optional set of initially matched task names.
+            command: Optional command as list of arguments.
+            command_string: Optional command as shell string.
+
+        Returns:
+            Dictionary suitable for JSON serialization.
+        """
+        output = {
+            "execution_plan": {
+                "total_tasks": len(task_names),
+                "tasks": task_names,
+            }
+        }
+
+        if changed_files:
+            output["changed_files"] = sorted(changed_files)
+
+        if matched_tasks:
+            output["matched_tasks"] = sorted(matched_tasks)
+            output["execution_plan"]["initially_matched"] = len(matched_tasks)
+
+        if command:
+            output["command"] = {
+                "args": command,
+                "string": command_string or " ".join(command),
+            }
+
+        return output

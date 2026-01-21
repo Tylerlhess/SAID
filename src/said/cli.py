@@ -110,13 +110,25 @@ def analyze(
         if output_json:
             import json
 
-            output = {
-                "changed_files": result["changed_files"],
-                "matched_tasks": list(result["matched_tasks"]),
-                "execution_order": result["execution_order"],
-                "command": result["command"],
-                "command_string": result["command_string"],
-            }
+            # Use orchestrator's JSON formatter for consistent output
+            orchestrator = coordinator.orchestrator
+            if orchestrator:
+                output = orchestrator.format_json_output(
+                    task_names=result["execution_order"],
+                    changed_files=result["changed_files"],
+                    matched_tasks=result["matched_tasks"],
+                    command=result["command"],
+                    command_string=result["command_string"],
+                )
+            else:
+                # Fallback to basic format
+                output = {
+                    "changed_files": result["changed_files"],
+                    "matched_tasks": list(result["matched_tasks"]),
+                    "execution_order": result["execution_order"],
+                    "command": result["command"],
+                    "command_string": result["command_string"],
+                }
             click.echo(json.dumps(output, indent=2))
         else:
             # Human-readable output
@@ -261,22 +273,33 @@ def execute(
             click.echo("No tasks to execute.")
             return
 
-        # Display execution plan
-        click.echo("\n" + "=" * 60)
-        click.echo("SAID Execution Plan")
-        click.echo("=" * 60)
+        # Display execution plan using orchestrator's formatter
+        orchestrator = coordinator.orchestrator
+        if orchestrator:
+            plan = orchestrator.format_execution_plan(
+                task_names=result["execution_order"],
+                changed_files=result["changed_files"],
+                matched_tasks=result["matched_tasks"],
+                command_string=result["command_string"],
+            )
+            click.echo("\n" + plan)
+        else:
+            # Fallback to basic format
+            click.echo("\n" + "=" * 60)
+            click.echo("SAID Execution Plan")
+            click.echo("=" * 60)
 
-        if result["changed_files"]:
-            click.echo("\nChanged Files:")
-            for file_path in result["changed_files"]:
-                click.echo(f"  - {file_path}")
+            if result["changed_files"]:
+                click.echo("\nChanged Files:")
+                for file_path in result["changed_files"]:
+                    click.echo(f"  - {file_path}")
 
-        click.echo(f"\nTasks to Execute ({len(result['execution_order'])}):")
-        for i, task_name in enumerate(result["execution_order"], start=1):
-            click.echo(f"  {i}. {task_name}")
+            click.echo(f"\nTasks to Execute ({len(result['execution_order'])}):")
+            for i, task_name in enumerate(result["execution_order"], start=1):
+                click.echo(f"  {i}. {task_name}")
 
-        click.echo("\nGenerated Ansible Command:")
-        click.echo(f"  {result['command_string']}")
+            click.echo("\nGenerated Ansible Command:")
+            click.echo(f"  {result['command_string']}")
 
         if dry_run:
             click.echo("\n[DRY RUN MODE - Command will not be executed]")

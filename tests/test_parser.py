@@ -7,6 +7,7 @@ import pytest
 
 from said.parser import (
     ParserError,
+    clear_dependency_map_cache,
     discover_dependency_map,
     parse_dependency_map,
     parse_inline_metadata,
@@ -298,3 +299,130 @@ tasks:
 
         with pytest.raises(ParserError):
             discover_dependency_map()
+
+    def test_discover_multiple_files(self, tmp_path, monkeypatch):
+        """Test discovering and merging multiple dependency map files."""
+        monkeypatch.chdir(tmp_path)
+        clear_dependency_map_cache()
+        
+        # Create two dependency map files
+        dep_map1 = tmp_path / "dependency_map.yml"
+        dep_map1.write_text(
+            """
+tasks:
+  - name: task1
+    provides: [resource1]
+    watch_files: [file1.yml]
+"""
+        )
+        
+        ansible_dir = tmp_path / "ansible"
+        ansible_dir.mkdir()
+        dep_map2 = ansible_dir / "dependency_map.yml"
+        dep_map2.write_text(
+            """
+tasks:
+  - name: task2
+    provides: [resource2]
+    watch_files: [file2.yml]
+"""
+        )
+
+        result = discover_dependency_map(search_multiple=True)
+        assert isinstance(result, DependencyMap)
+        assert len(result.tasks) == 2
+        assert result.get_task_by_name("task1") is not None
+        assert result.get_task_by_name("task2") is not None
+
+
+class TestDependencyMapCaching:
+    """Test cases for dependency map caching."""
+
+    def test_cache_parsing(self, tmp_path):
+        """Test that parsing is cached based on file mtime."""
+        clear_dependency_map_cache()
+        
+        dep_map_file = tmp_path / "dependency_map.yml"
+        yaml_content = """
+tasks:
+  - name: task1
+    provides: [resource1]
+"""
+        dep_map_file.write_text(yaml_content)
+
+        # Parse first time
+        result1 = parse_dependency_map(dep_map_file, use_cache=True)
+        assert isinstance(result1, DependencyMap)
+
+        # Parse second time - should use cache
+        result2 = parse_dependency_map(dep_map_file, use_cache=True)
+        assert result1 is result2  # Should be same object from cache
+
+    def test_cache_invalidated_on_file_change(self, tmp_path):
+        """Test that cache is invalidated when file changes."""
+        clear_dependency_map_cache()
+        
+        dep_map_file = tmp_path / "dependency_map.yml"
+        yaml_content1 = """
+tasks:
+  - name: task1
+    provides: [resource1]
+"""
+        dep_map_file.write_text(yaml_content1)
+
+        result1 = parse_dependency_map(dep_map_file, use_cache=True)
+        
+        # Modify file (change mtime)
+        import time
+        time.sleep(0.1)  # Ensure mtime changes
+        yaml_content2 = """
+tasks:
+  - name: task1
+    provides: [resource1]
+  - name: task2
+    provides: [resource2]
+"""
+        dep_map_file.write_text(yaml_content2)
+
+        result2 = parse_dependency_map(dep_map_file, use_cache=True)
+        # Should be different objects (cache miss due to mtime change)
+        assert result1 is not result2
+        assert len(result2.tasks) == 2
+
+    def test_cache_disabled(self, tmp_path):
+        """Test that caching can be disabled."""
+        clear_dependency_map_cache()
+        
+        dep_map_file = tmp_path / "dependency_map.yml"
+        dep_map_file.write_text(
+            """
+tasks:
+  - name: task1
+    provides: [resource1]
+"""
+        )
+
+        result1 = parse_dependency_map(dep_map_file, use_cache=False)
+        result2 = parse_dependency_map(dep_map_file, use_cache=False)
+        # Should be different objects when cache is disabled
+        assert result1 is not result2
+
+    def test_clear_cache(self, tmp_path):
+        """Test clearing the cache."""
+        clear_dependency_map_cache()
+        
+        dep_map_file = tmp_path / "dependency_map.yml"
+        dep_map_file.write_text(
+            """
+tasks:
+  - name: task1
+    provides: [resource1]
+"""
+        )
+
+        parse_dependency_map(dep_map_file, use_cache=True)
+        clear_dependency_map_cache()
+        
+        # After clearing, should parse fresh
+        result = parse_dependency_map(dep_map_file, use_cache=True)
+        assert isinstance(result, DependencyMap)

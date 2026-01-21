@@ -15,6 +15,7 @@ from said.matcher import (
 )
 from said.parser import (
     ParserError,
+    clear_dependency_map_cache,
     discover_dependency_map,
     parse_dependency_map,
     parse_inline_metadata,
@@ -66,6 +67,7 @@ __all__ = [
     "parse_inline_metadata",
     "parse_playbook_directory",
     "discover_dependency_map",
+    "clear_dependency_map_cache",
     # DAG builder
     "DependencyGraph",
     "DAGError",

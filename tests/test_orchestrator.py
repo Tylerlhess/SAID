@@ -90,3 +90,44 @@ class TestAnsibleOrchestrator:
         assert "SAID Execution Plan" in plan
         assert "task1" in plan
         assert "Changed Files" not in plan or "Changed Files:" in plan
+
+    def test_format_execution_plan_with_matched_tasks(self):
+        """Test execution plan formatting with matched tasks."""
+        orchestrator = AnsibleOrchestrator()
+        plan = orchestrator.format_execution_plan(
+            ["task1", "task2"],
+            changed_files=["file1.yml"],
+            matched_tasks={"task1"},
+            command_string="ansible-playbook playbook.yml --tags task1,task2",
+        )
+        assert "SAID Execution Plan" in plan
+        assert "task1" in plan
+        assert "task2" in plan
+        assert "file1.yml" in plan
+        assert "ansible-playbook" in plan
+
+    def test_format_json_output(self):
+        """Test JSON output formatting."""
+        orchestrator = AnsibleOrchestrator()
+        output = orchestrator.format_json_output(
+            task_names=["task1", "task2"],
+            changed_files=["file1.yml"],
+            matched_tasks={"task1"},
+            command=["ansible-playbook", "playbook.yml", "--tags", "task1,task2"],
+            command_string="ansible-playbook playbook.yml --tags task1,task2",
+        )
+        assert "execution_plan" in output
+        assert output["execution_plan"]["total_tasks"] == 2
+        assert output["execution_plan"]["tasks"] == ["task1", "task2"]
+        assert output["changed_files"] == ["file1.yml"]
+        assert output["matched_tasks"] == ["task1"]
+        assert "command" in output
+        assert output["command"]["string"] == "ansible-playbook playbook.yml --tags task1,task2"
+
+    def test_format_json_output_minimal(self):
+        """Test JSON output formatting with minimal data."""
+        orchestrator = AnsibleOrchestrator()
+        output = orchestrator.format_json_output(task_names=["task1"])
+        assert "execution_plan" in output
+        assert output["execution_plan"]["total_tasks"] == 1
+        assert output["execution_plan"]["tasks"] == ["task1"]
