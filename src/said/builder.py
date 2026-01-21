@@ -227,6 +227,7 @@ def analyze_role(role_path: Path, base_path: Path, visited: Set[Path]) -> List[D
 
     visited.add(role_path)
     all_tasks = []
+    role_name = role_path.name
 
     # Analyze main tasks
     main_tasks_path = role_path / "tasks" / "main.yml"
@@ -236,6 +237,10 @@ def analyze_role(role_path: Path, base_path: Path, visited: Set[Path]) -> List[D
     if main_tasks_path.exists():
         try:
             tasks = analyze_ansible_playbook(main_tasks_path, visited)
+            # Prefix task names with role name to avoid conflicts
+            for task in tasks:
+                if task["name"] and not task["name"].startswith(f"{role_name}_"):
+                    task["name"] = f"{role_name}_{task['name']}"
             all_tasks.extend(tasks)
         except BuilderError:
             pass  # Skip if role tasks can't be parsed
@@ -248,10 +253,12 @@ def analyze_role(role_path: Path, base_path: Path, visited: Set[Path]) -> List[D
     if handlers_path.exists():
         try:
             tasks = analyze_ansible_playbook(handlers_path, visited)
-            # Mark handlers appropriately
+            # Mark handlers appropriately and prefix names
             for task in tasks:
                 if "triggers" not in task or not task["triggers"]:
                     task["triggers"] = [f"notify_{task['name']}"]
+                if task["name"] and not task["name"].startswith(f"{role_name}_"):
+                    task["name"] = f"{role_name}_{task['name']}"
             all_tasks.extend(tasks)
         except BuilderError:
             pass
@@ -430,8 +437,13 @@ def analyze_ansible_playbook(
                         if included_path:
                             try:
                                 included_tasks = analyze_ansible_playbook(included_path, visited)
+                                # Prefix task names with include path to avoid conflicts
+                                include_prefix = included_path.stem
+                                for included_task in included_tasks:
+                                    if included_task["name"] and not included_task["name"].startswith(f"{include_prefix}_"):
+                                        included_task["name"] = f"{include_prefix}_{included_task['name']}"
                                 all_tasks.extend(included_tasks)
-                            except BuilderError:
+                            except BuilderError as e:
                                 # If include fails, still analyze the include task itself
                                 task_meta = analyze_ansible_task(task, playbook_path)
                                 if task_meta:
@@ -507,12 +519,14 @@ def analyze_ansible_playbook(
 def build_dependency_map_from_playbooks(
     playbook_paths: List[Union[str, Path]],
     output_path: Optional[Union[str, Path]] = None,
+    verbose: bool = False,
 ) -> DependencyMap:
     """Build a dependency map by analyzing multiple Ansible playbooks.
 
     Args:
         playbook_paths: List of paths to Ansible playbook files.
         output_path: Optional path to write the generated dependency map YAML file.
+        verbose: If True, print debug information about discovered tasks.
 
     Returns:
         Validated DependencyMap instance.
@@ -525,6 +539,8 @@ def build_dependency_map_from_playbooks(
     for playbook_path in playbook_paths:
         try:
             tasks = analyze_ansible_playbook(playbook_path)
+            if verbose:
+                print(f"Found {len(tasks)} tasks in {playbook_path}")
             all_tasks.extend(tasks)
         except BuilderError as e:
             raise BuilderError(f"Failed to analyze {playbook_path}: {e}")
@@ -532,13 +548,26 @@ def build_dependency_map_from_playbooks(
     if not all_tasks:
         raise BuilderError("No tasks found in playbooks")
 
+    if verbose:
+        print(f"Total tasks before deduplication: {len(all_tasks)}")
+        task_names = [task["name"] for task in all_tasks]
+        duplicates = [name for name in task_names if task_names.count(name) > 1]
+        if duplicates:
+            print(f"Duplicate task names found: {set(duplicates)}")
+
     # Deduplicate tasks by name (keep first occurrence)
+    # Note: This might remove tasks from included playbooks/roles if they have the same name
     seen_names = set()
     unique_tasks = []
     for task in all_tasks:
         if task["name"] not in seen_names:
             unique_tasks.append(task)
             seen_names.add(task["name"])
+        elif verbose:
+            print(f"Skipping duplicate task: {task['name']}")
+
+    if verbose:
+        print(f"Tasks after deduplication: {len(unique_tasks)}")
 
     # Build dependency map
     try:
@@ -575,6 +604,7 @@ def build_dependency_map_from_directory(
     directory: Union[str, Path],
     output_path: Optional[Union[str, Path]] = None,
     pattern: str = "*.yml",
+    verbose: bool = False,
 ) -> DependencyMap:
     """Build a dependency map by analyzing all playbooks in a directory.
 
@@ -605,4 +635,4 @@ def build_dependency_map_from_directory(
     if not playbook_paths:
         raise BuilderError(f"No playbook files found in {directory}")
 
-    return build_dependency_map_from_playbooks(playbook_paths, output_path)
+    return build_dependency_map_from_playbooks(playbook_paths, output_path, verbose=verbose)

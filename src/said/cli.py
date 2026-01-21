@@ -466,11 +466,18 @@ def validate(
     is_flag=True,
     help="Overwrite existing dependency_map.yml if it exists.",
 )
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Show verbose output about discovered tasks.",
+)
 def build(
     playbook: tuple,
     directory: Optional[Path],
     output: Path,
     overwrite: bool,
+    verbose: bool,
 ):
     """Automatically build dependency map from Ansible playbooks.
 
@@ -512,12 +519,12 @@ def build(
                     err=True,
                 )
             click.echo(f"Analyzing playbooks in {directory}...")
-            dep_map = build_dependency_map_from_directory(directory, output)
+            dep_map = build_dependency_map_from_directory(directory, output, verbose=verbose)
         elif playbook_paths:
             click.echo(f"Analyzing {len(playbook_paths)} playbook(s)...")
             for i, pb in enumerate(playbook_paths, 1):
                 click.echo(f"  {i}. {pb}")
-            dep_map = build_dependency_map_from_playbooks(playbook_paths, output)
+            dep_map = build_dependency_map_from_playbooks(playbook_paths, output, verbose=verbose)
         else:
             click.echo(
                 "Error: Must specify either --directory or --playbook",
