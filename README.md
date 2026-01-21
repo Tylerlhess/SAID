@@ -115,6 +115,7 @@ Analyze changes and generate execution plan without executing.
 - `--no-triggers`: Do not include triggered tasks
 - `--no-validate`: Skip variable validation
 - `--json`: Output results in JSON format
+- `--json-errors`: Output validation errors in JSON format (only if validation fails)
 
 ### `said execute`
 
@@ -131,10 +132,27 @@ Execute Ansible tasks based on git changes.
 
 Validate dependency map and required variables.
 
+Comprehensively validates:
+- Missing variables
+- Missing dependencies (resources that don't exist)
+- Missing triggers (tasks that don't exist)
+- Circular dependencies
+- Invalid task references
+
+**Features:**
+- **Automatic variable search**: When variables are missing, SAID automatically searches for where they might be defined in:
+  - `group_vars/` directories
+  - `host_vars/` directories
+  - Inventory files (`hosts.ini`, `hosts.yml`)
+  - Playbook files (in `vars` sections)
+  - Role defaults (`roles/*/defaults/main.yml`)
+  - Role vars (`roles/*/vars/main.yml`)
+
 **Options:**
 - `--dependency-map, -d`: Path to dependency_map.yml
 - `--inventory, -i`: Path to Ansible inventory file
 - `--variables, -v`: Path to YAML file containing variables
+- `--json`: Output errors in JSON format (includes all errors, not just the first)
 
 ### `said build`
 

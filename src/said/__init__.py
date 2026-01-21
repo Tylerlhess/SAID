@@ -62,6 +62,18 @@ from said.inventory_loader import (
     load_host_vars,
     load_inventory_variables,
 )
+from said.error_collector import (
+    DependencyError,
+    DependencyErrorCollector,
+    DependencyErrorReport,
+    validate_dependency_map_comprehensive,
+)
+from said.variable_searcher import (
+    find_all_variable_suggestions,
+    find_variable_suggestions,
+    search_variable_in_text_file,
+    search_variable_in_yaml_file,
+)
 
 __all__ = [
     "__version__",
@@ -126,4 +138,14 @@ __all__ = [
     "discover_group_vars",
     "discover_host_vars",
     "load_all_variables",
+    # Error Collector
+    "DependencyError",
+    "DependencyErrorCollector",
+    "DependencyErrorReport",
+    "validate_dependency_map_comprehensive",
+    # Variable Searcher
+    "find_variable_suggestions",
+    "find_all_variable_suggestions",
+    "search_variable_in_yaml_file",
+    "search_variable_in_text_file",
 ]

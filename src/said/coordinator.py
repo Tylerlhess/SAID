@@ -307,25 +307,52 @@ class WorkflowCoordinator:
         except ResolverError as e:
             raise CoordinatorError(f"Failed to resolve dependencies: {e}")
 
-    def validate_variables(self, task_names: Set[str]) -> None:
+    def validate_variables(
+        self, task_names: Set[str], collect_all_errors: bool = False
+    ) -> Optional[Dict]:
         """Validate that all required variables are present.
 
         Args:
             task_names: Set of task names to validate.
+            collect_all_errors: If True, collect all errors and return error report instead of raising.
+
+        Returns:
+            If collect_all_errors is True, returns error report dict. Otherwise None.
 
         Raises:
-            CoordinatorError: If validation fails.
+            CoordinatorError: If validation fails and collect_all_errors is False.
         """
         if self.dependency_map is None:
             raise CoordinatorError(
                 "Dependency map not loaded. Call load_dependency_map() first."
             )
 
+        if collect_all_errors:
+            from said.error_collector import validate_dependency_map_comprehensive
+            from pathlib import Path
+
+            # Use playbook directory as search base if available
+            search_base = None
+            if hasattr(self, "playbook_path") and self.playbook_path:
+                search_base = Path(self.playbook_path).parent
+
+            error_report = validate_dependency_map_comprehensive(
+                self.dependency_map,
+                task_names=task_names,
+                variables=self.variables,
+                search_base=search_base,
+                search_for_suggestions=True,
+            )
+            if error_report.has_errors():
+                return error_report.to_dict()
+            return None
+
         try:
             check_variables_required(
                 self.dependency_map, task_names, self.variables
             )
             self.logger.info("Variable validation passed")
+            return None
 
         except MissingVariableError as e:
             raise CoordinatorError(
@@ -368,6 +395,7 @@ class WorkflowCoordinator:
         validate_vars: bool = True,
         dry_run: bool = False,
         full_deploy: bool = False,
+        collect_all_errors: bool = False,
     ) -> Dict:
         """Run the complete SAID workflow.
 
@@ -445,8 +473,14 @@ class WorkflowCoordinator:
             }
 
         # Validate variables
+        validation_errors = None
         if validate_vars:
-            self.validate_variables(set(execution_order))
+            validation_errors = self.validate_variables(
+                set(execution_order), collect_all_errors=collect_all_errors
+            )
+            if validation_errors and not collect_all_errors:
+                # If collect_all_errors is False, validate_variables will raise
+                pass
 
         # Generate Ansible command
         command = self.generate_ansible_command(execution_order, dry_run=dry_run)
@@ -454,13 +488,19 @@ class WorkflowCoordinator:
             execution_order, dry_run=dry_run
         )
 
-        return {
+        result = {
             "changed_files": changed_files,
             "matched_tasks": matched_tasks,
             "execution_order": execution_order,
             "command": command,
             "command_string": command_string,
         }
+
+        # Include validation errors if collected
+        if validation_errors:
+            result["validation_errors"] = validation_errors
+
+        return result
 
     def update_successful_commit(self, commit_sha: str, environment: str = "default") -> None:
         """Update the last successful commit in the state store.

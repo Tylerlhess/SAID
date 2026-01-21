@@ -80,6 +80,11 @@ def cli():
     is_flag=True,
     help="Output results in JSON format.",
 )
+@click.option(
+    "--json-errors",
+    is_flag=True,
+    help="Output validation errors in JSON format (only if validation fails).",
+)
 def analyze(
     dependency_map: Optional[Path],
     from_commit: Optional[str],
@@ -90,6 +95,7 @@ def analyze(
     no_triggers: bool,
     no_validate: bool,
     output_json: bool,
+    json_errors: bool,
 ):
     """Analyze changes and generate execution plan without executing.
 
@@ -110,7 +116,46 @@ def analyze(
             include_triggers=not no_triggers,
             validate_vars=not no_validate,
             dry_run=True,
+            collect_all_errors=json_errors,
         )
+
+        # Check for validation errors
+        if "validation_errors" in result and result["validation_errors"]:
+            if json_errors or output_json:
+                import json
+
+                error_output = {
+                    "validation_errors": result["validation_errors"],
+                    "workflow_result": {
+                        "changed_files": result["changed_files"],
+                        "matched_tasks": list(result["matched_tasks"]),
+                        "execution_order": result["execution_order"],
+                    },
+                }
+                click.echo(json.dumps(error_output, indent=2))
+            else:
+                from said.error_collector import DependencyErrorReport
+
+                # Reconstruct error report for display
+                error_report = DependencyErrorReport(
+                    errors=[
+                        type("obj", (object,), {
+                            "error_type": err["error_type"],
+                            "task_name": err["task_name"],
+                            "message": err["message"],
+                            "details": err["details"],
+                        })()
+                        for err in result["validation_errors"]["errors"]
+                    ],
+                    total_errors=result["validation_errors"]["total_errors"],
+                    error_summary=result["validation_errors"]["error_summary"],
+                )
+
+                click.echo("\n✗ Validation errors detected:")
+                click.echo(f"Total errors: {error_report.total_errors}")
+                for error in error_report.errors:
+                    click.echo(f"  - {error.message}")
+            sys.exit(1)
 
         if output_json:
             import json
@@ -236,6 +281,11 @@ def analyze(
     is_flag=True,
     help="Do not update state store after successful execution.",
 )
+@click.option(
+    "--json-errors",
+    is_flag=True,
+    help="Output validation errors in JSON format (only if validation fails).",
+)
 def execute(
     dependency_map: Optional[Path],
     from_commit: Optional[str],
@@ -249,6 +299,7 @@ def execute(
     full_deploy: bool,
     environment: str,
     no_state_update: bool,
+    json_errors: bool,
 ):
     """Execute Ansible tasks based on git changes.
 
@@ -272,7 +323,46 @@ def execute(
             validate_vars=not no_validate,
             dry_run=dry_run,
             full_deploy=full_deploy,
+            collect_all_errors=json_errors,
         )
+
+        # Check for validation errors
+        if "validation_errors" in result and result["validation_errors"]:
+            if json_errors:
+                import json
+
+                error_output = {
+                    "validation_errors": result["validation_errors"],
+                    "workflow_result": {
+                        "changed_files": result["changed_files"],
+                        "matched_tasks": list(result["matched_tasks"]),
+                        "execution_order": result["execution_order"],
+                    },
+                }
+                click.echo(json.dumps(error_output, indent=2))
+            else:
+                from said.error_collector import DependencyErrorReport
+
+                # Reconstruct error report for display
+                error_report = DependencyErrorReport(
+                    errors=[
+                        type("obj", (object,), {
+                            "error_type": err["error_type"],
+                            "task_name": err["task_name"],
+                            "message": err["message"],
+                            "details": err["details"],
+                        })()
+                        for err in result["validation_errors"]["errors"]
+                    ],
+                    total_errors=result["validation_errors"]["total_errors"],
+                    error_summary=result["validation_errors"]["error_summary"],
+                )
+
+                click.echo("\n✗ Validation errors detected:")
+                click.echo(f"Total errors: {error_report.total_errors}")
+                for error in error_report.errors:
+                    click.echo(f"  - {error.message}")
+            sys.exit(1)
 
         if not result["execution_order"]:
             click.echo("No tasks to execute.")
@@ -371,10 +461,17 @@ def execute(
     type=str,
     help="Path to YAML file containing variables.",
 )
+@click.option(
+    "--json",
+    "output_json",
+    is_flag=True,
+    help="Output errors in JSON format.",
+)
 def validate(
     dependency_map: Optional[Path],
     inventory: Optional[Path],
     variables: Optional[str],
+    output_json: bool,
 ):
     """Validate dependency map and required variables.
 
@@ -418,27 +515,81 @@ def validate(
                 click.echo(f"Error loading variables file: {e}", err=True)
                 sys.exit(1)
 
-        # Validate variables for all tasks
-        validator = VariableValidator(vars_dict)
-        validation_results = validator.validate_dependency_map(
-            dep_map, set(task.name for task in dep_map.tasks)
+        # Comprehensive validation with error collection
+        from said.error_collector import validate_dependency_map_comprehensive
+
+        # Determine search base (use dependency map location or current directory)
+        search_base = None
+        if dependency_map:
+            search_base = dependency_map.parent
+        else:
+            # Try to find dependency map location
+            from said.parser import discover_dependency_map
+            discovered_map = discover_dependency_map()
+            if discovered_map:
+                # Use current directory as search base
+                search_base = Path.cwd()
+
+        error_report = validate_dependency_map_comprehensive(
+            dep_map,
+            task_names=set(task.name for task in dep_map.tasks),
+            variables=vars_dict if vars_dict else None,
+            search_base=search_base,
+            search_for_suggestions=True,
         )
 
-        # Report results
-        errors = []
-        for task_name, missing_vars in validation_results.items():
-            if missing_vars:
-                errors.append((task_name, missing_vars))
+        if error_report.has_errors():
+            if output_json:
+                click.echo(error_report.to_json())
+            else:
+                click.echo("\n✗ Dependency validation failed:")
+                click.echo(f"Total errors: {error_report.total_errors}")
+                click.echo(f"Error summary: {error_report.error_summary}\n")
 
-        if errors:
-            click.echo("\n✗ Variable validation failed:")
-            for task_name, missing_vars in errors:
-                click.echo(
-                    f"  Task '{task_name}' missing variables: {', '.join(sorted(missing_vars))}"
-                )
+                # Group errors by type
+                errors_by_type = {}
+                for error in error_report.errors:
+                    if error.error_type not in errors_by_type:
+                        errors_by_type[error.error_type] = []
+                    errors_by_type[error.error_type].append(error)
+
+                for error_type, type_errors in errors_by_type.items():
+                    click.echo(f"\n{error_type.replace('_', ' ').title()} ({len(type_errors)}):")
+                    for error in type_errors:
+                        click.echo(f"  - {error.message}")
+                        if error.details:
+                            for key, value in error.details.items():
+                                if key == "suggestions":
+                                    # Format suggestions nicely
+                                    click.echo(f"    Suggestions for missing variables:")
+                                    for var_name, var_suggestions in value.items():
+                                        click.echo(f"      {var_name}:")
+                                        for category, files in var_suggestions.items():
+                                            if files:
+                                                click.echo(f"        {category}:")
+                                                for file_info in files[:3]:  # Limit to 3 per category
+                                                    file_path = file_info.get("file", "unknown")
+                                                    if "line_number" in file_info:
+                                                        click.echo(f"          - {file_path}:{file_info['line_number']}")
+                                                    else:
+                                                        click.echo(f"          - {file_path}")
+                                                if len(files) > 3:
+                                                    click.echo(f"          ... and {len(files) - 3} more")
+                                elif isinstance(value, list) and len(value) > 5:
+                                    click.echo(f"    {key}: {len(value)} items")
+                                elif isinstance(value, dict):
+                                    # For nested dicts, show a summary
+                                    click.echo(f"    {key}: {len(value)} items")
+                                else:
+                                    click.echo(f"    {key}: {value}")
+
             sys.exit(1)
         else:
-            click.echo("✓ All required variables are defined")
+            if output_json:
+                click.echo('{"total_errors": 0, "errors": []}')
+            else:
+                click.echo("✓ All dependencies are valid")
+                click.echo("✓ All required variables are defined")
 
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
