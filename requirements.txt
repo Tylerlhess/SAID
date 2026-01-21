@@ -1,0 +1,5 @@
+# Production dependencies for SAID
+ansible>=6.0.0
+networkx>=3.0
+pyyaml>=6.0
+gitpython>=3.1.0
