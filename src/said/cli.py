@@ -7,6 +7,11 @@ from typing import Optional
 import click
 
 from said.coordinator import CoordinatorError, WorkflowCoordinator
+from said.inventory_loader import (
+    load_all_variables,
+    load_group_vars,
+    load_host_vars,
+)
 
 
 @click.group()
@@ -472,12 +477,38 @@ def validate(
     is_flag=True,
     help="Show verbose output about discovered tasks.",
 )
+@click.option(
+    "--hosts",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to Ansible inventory file (hosts.ini or hosts.yml).",
+)
+@click.option(
+    "--groupvars",
+    type=click.Path(exists=True, path_type=Path),
+    multiple=True,
+    help="Path to group_vars file or directory. Can be specified multiple times.",
+)
+@click.option(
+    "--hostvars",
+    type=click.Path(exists=True, path_type=Path),
+    multiple=True,
+    help="Path to host_vars file or directory. Can be specified multiple times.",
+)
+@click.option(
+    "--no-auto-discover-vars",
+    is_flag=True,
+    help="Disable auto-discovery of group_vars and host_vars.",
+)
 def build(
     playbook: tuple,
     directory: Optional[Path],
     output: Path,
     overwrite: bool,
     verbose: bool,
+    hosts: Optional[Path],
+    groupvars: tuple,
+    hostvars: tuple,
+    no_auto_discover_vars: bool,
 ):
     """Automatically build dependency map from Ansible playbooks.
 
@@ -488,9 +519,13 @@ def build(
     - Required variables from variable references
     - Dependencies from task relationships
 
+    Variables from inventory, group_vars, and host_vars are used to filter
+    out known variables from the required_vars list.
+
     Example:
         said build --directory ./playbooks --output dependency_map.yml
         said build --playbook site.yml --playbook roles/web/tasks/main.yml
+        said build -p roles/consul_keepalived/tasks/main.yml --hosts inventories/dev/hosts.ini --groupvars inventories/dev/group_vars/dev2.yml
     """
     try:
         from said.builder import (
@@ -501,6 +536,54 @@ def build(
 
         # Convert tuple to list (click's multiple=True returns a tuple)
         playbook_paths = list(playbook) if playbook and len(playbook) > 0 else []
+        group_vars_paths = list(groupvars) if groupvars else []
+        host_vars_paths = list(hostvars) if hostvars else []
+
+        # Load variables from inventory, group_vars, and host_vars
+        known_variables = {}
+        if hosts or group_vars_paths or host_vars_paths or not no_auto_discover_vars:
+            if verbose:
+                click.echo("Loading variables from inventory and vars files...")
+            
+            # Determine inventory directory for auto-discovery
+            inventory_dir = None
+            if hosts:
+                inventory_dir = Path(hosts).parent
+                if verbose:
+                    click.echo(f"  Inventory: {hosts}")
+
+            # Load from explicit paths
+            for gv_path in group_vars_paths:
+                if verbose:
+                    click.echo(f"  Group vars: {gv_path}")
+            for hv_path in host_vars_paths:
+                if verbose:
+                    click.echo(f"  Host vars: {hv_path}")
+
+            try:
+                known_variables = load_all_variables(
+                    inventory_path=hosts,
+                    group_vars_path=group_vars_paths[0] if group_vars_paths else None,
+                    host_vars_path=host_vars_paths[0] if host_vars_paths else None,
+                    auto_discover=not no_auto_discover_vars,
+                )
+                # Merge multiple group_vars/host_vars if provided
+                for gv_path in group_vars_paths[1:]:
+                    try:
+                        known_variables.update(load_group_vars(gv_path))
+                    except Exception:
+                        pass
+                for hv_path in host_vars_paths[1:]:
+                    try:
+                        known_variables.update(load_host_vars(hv_path))
+                    except Exception:
+                        pass
+                
+                if verbose:
+                    click.echo(f"  Loaded {len(known_variables)} known variables")
+            except Exception as e:
+                if verbose:
+                    click.echo(f"  Warning: Could not load some variables: {e}", err=True)
 
         # Check if output file exists
         if output.exists() and not overwrite:
@@ -519,12 +602,16 @@ def build(
                     err=True,
                 )
             click.echo(f"Analyzing playbooks in {directory}...")
-            dep_map = build_dependency_map_from_directory(directory, output, verbose=verbose)
+            dep_map = build_dependency_map_from_directory(
+                directory, output, verbose=verbose, known_variables=known_variables
+            )
         elif playbook_paths:
             click.echo(f"Analyzing {len(playbook_paths)} playbook(s)...")
             for i, pb in enumerate(playbook_paths, 1):
                 click.echo(f"  {i}. {pb}")
-            dep_map = build_dependency_map_from_playbooks(playbook_paths, output, verbose=verbose)
+            dep_map = build_dependency_map_from_playbooks(
+                playbook_paths, output, verbose=verbose, known_variables=known_variables
+            )
         else:
             click.echo(
                 "Error: Must specify either --directory or --playbook",

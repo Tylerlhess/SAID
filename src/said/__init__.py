@@ -53,6 +53,15 @@ from said.builder import (
     find_role_path,
     resolve_playbook_path,
 )
+from said.inventory_loader import (
+    InventoryLoaderError,
+    discover_group_vars,
+    discover_host_vars,
+    load_all_variables,
+    load_group_vars,
+    load_host_vars,
+    load_inventory_variables,
+)
 
 __all__ = [
     "__version__",
@@ -109,4 +118,12 @@ __all__ = [
     "build_dependency_map_from_playbooks",
     "find_role_path",
     "resolve_playbook_path",
+    # Inventory Loader
+    "InventoryLoaderError",
+    "load_inventory_variables",
+    "load_group_vars",
+    "load_host_vars",
+    "discover_group_vars",
+    "discover_host_vars",
+    "load_all_variables",
 ]

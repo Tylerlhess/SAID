@@ -160,6 +160,10 @@ This command analyzes your Ansible playbooks and automatically infers:
 - `--directory, -d`: Path to directory containing Ansible playbooks
 - `--output, -o`: Output path for generated dependency map (default: dependency_map.yml)
 - `--overwrite`: Overwrite existing dependency_map.yml if it exists
+- `--hosts`: Path to Ansible inventory file (hosts.ini or hosts.yml)
+- `--groupvars`: Path to group_vars file or directory. Can be specified multiple times.
+- `--hostvars`: Path to host_vars file or directory. Can be specified multiple times.
+- `--no-auto-discover-vars`: Disable auto-discovery of group_vars and host_vars
 
 **Examples:**
 ```bash
@@ -168,6 +172,11 @@ said build --playbook site.yml --playbook roles/web/tasks/main.yml
 
 # Build from directory (recursively analyzes all playbooks)
 said build --directory ./playbooks
+
+# Build with inventory and group vars (filters known variables)
+said build -p roles/consul_keepalived/tasks/main.yml \
+  --hosts inventories/dev/hosts.ini \
+  --groupvars inventories/dev/group_vars/dev2.yml
 
 # Custom output location
 said build --directory ./ansible --output custom_map.yml

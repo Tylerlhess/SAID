@@ -638,6 +638,7 @@ def build_dependency_map_from_playbooks(
     playbook_paths: List[Union[str, Path]],
     output_path: Optional[Union[str, Path]] = None,
     verbose: bool = False,
+    known_variables: Optional[Dict] = None,
 ) -> DependencyMap:
     """Build a dependency map by analyzing multiple Ansible playbooks.
 
@@ -645,6 +646,7 @@ def build_dependency_map_from_playbooks(
         playbook_paths: List of paths to Ansible playbook files.
         output_path: Optional path to write the generated dependency map YAML file.
         verbose: If True, print debug information about discovered tasks.
+        known_variables: Optional dictionary of known variables to filter from requires_vars.
 
     Returns:
         Validated DependencyMap instance.
@@ -667,6 +669,22 @@ def build_dependency_map_from_playbooks(
 
     if not all_tasks:
         raise BuilderError("No tasks found in playbooks")
+
+    # Filter out known variables from requires_vars
+    if known_variables:
+        known_var_names = set(known_variables.keys())
+        # Also check nested keys (e.g., if environment_servers is a dict, its keys are known)
+        for var_name, var_value in known_variables.items():
+            if isinstance(var_value, dict):
+                known_var_names.update(var_value.keys())
+        
+        for task in all_tasks:
+            if "requires_vars" in task:
+                # Remove variables that are known from inventory/vars
+                task["requires_vars"] = [
+                    var for var in task["requires_vars"]
+                    if var not in known_var_names
+                ]
 
     if verbose:
         print(f"Total tasks before deduplication: {len(all_tasks)}")
@@ -725,6 +743,7 @@ def build_dependency_map_from_directory(
     output_path: Optional[Union[str, Path]] = None,
     pattern: str = "*.yml",
     verbose: bool = False,
+    known_variables: Optional[Dict] = None,
 ) -> DependencyMap:
     """Build a dependency map by analyzing all playbooks in a directory.
 
@@ -755,4 +774,6 @@ def build_dependency_map_from_directory(
     if not playbook_paths:
         raise BuilderError(f"No playbook files found in {directory}")
 
-    return build_dependency_map_from_playbooks(playbook_paths, output_path, verbose=verbose)
+    return build_dependency_map_from_playbooks(
+        playbook_paths, output_path, verbose=verbose, known_variables=known_variables
+    )
