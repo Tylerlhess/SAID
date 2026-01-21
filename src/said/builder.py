@@ -236,11 +236,8 @@ def analyze_role(role_path: Path, base_path: Path, visited: Set[Path]) -> List[D
 
     if main_tasks_path.exists():
         try:
-            tasks = analyze_ansible_playbook(main_tasks_path, visited)
-            # Prefix task names with role name to avoid conflicts
-            for task in tasks:
-                if task["name"] and not task["name"].startswith(f"{role_name}_"):
-                    task["name"] = f"{role_name}_{task['name']}"
+            # Pass role name as prefix - analyze_ansible_playbook will prefix all tasks
+            tasks = analyze_ansible_playbook(main_tasks_path, visited, source_prefix=role_name)
             all_tasks.extend(tasks)
         except BuilderError:
             pass  # Skip if role tasks can't be parsed
@@ -252,13 +249,12 @@ def analyze_role(role_path: Path, base_path: Path, visited: Set[Path]) -> List[D
 
     if handlers_path.exists():
         try:
-            tasks = analyze_ansible_playbook(handlers_path, visited)
-            # Mark handlers appropriately and prefix names
+            # Pass role name as prefix for handlers too
+            tasks = analyze_ansible_playbook(handlers_path, visited, source_prefix=role_name)
+            # Mark handlers appropriately
             for task in tasks:
                 if "triggers" not in task or not task["triggers"]:
                     task["triggers"] = [f"notify_{task['name']}"]
-                if task["name"] and not task["name"].startswith(f"{role_name}_"):
-                    task["name"] = f"{role_name}_{task['name']}"
             all_tasks.extend(tasks)
         except BuilderError:
             pass
@@ -357,7 +353,9 @@ def infer_dependencies_from_playbook(
 
 
 def analyze_ansible_playbook(
-    playbook_path: Union[str, Path], visited: Optional[Set[Path]] = None
+    playbook_path: Union[str, Path], 
+    visited: Optional[Set[Path]] = None,
+    source_prefix: Optional[str] = None,
 ) -> List[Dict]:
     """Analyze an Ansible playbook and extract task metadata.
 
@@ -366,6 +364,7 @@ def analyze_ansible_playbook(
     Args:
         playbook_path: Path to the Ansible playbook file.
         visited: Set of already visited paths to prevent infinite recursion.
+        source_prefix: Optional prefix to add to all task names from this playbook.
 
     Returns:
         List of task metadata dictionaries.
@@ -385,6 +384,11 @@ def analyze_ansible_playbook(
         raise BuilderError(f"Playbook not found: {playbook_path}")
 
     visited.add(playbook_path)
+
+    # Determine prefix for this playbook if not provided
+    if source_prefix is None:
+        # Use playbook filename (without extension) as prefix
+        source_prefix = playbook_path.stem
 
     try:
         with open(playbook_path, "r", encoding="utf-8") as f:
@@ -418,7 +422,9 @@ def analyze_ansible_playbook(
             if isinstance(handler, dict):
                 task_meta = analyze_ansible_task(handler, playbook_path)
                 if task_meta:
-                    # Mark as handler-triggered
+                    # Prefix with source and mark as handler-triggered
+                    if task_meta["name"] and not task_meta["name"].startswith(f"{source_prefix}_"):
+                        task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
                     task_meta["triggers"] = [f"notify_{task_meta['name']}"]
                     all_tasks.append(task_meta)
 
@@ -436,26 +442,30 @@ def analyze_ansible_playbook(
                         included_path = resolve_playbook_path(include_path_str, playbook_path)
                         if included_path:
                             try:
-                                included_tasks = analyze_ansible_playbook(included_path, visited)
-                                # Prefix task names with include path to avoid conflicts
+                                # Use included playbook name as prefix
                                 include_prefix = included_path.stem
-                                for included_task in included_tasks:
-                                    if included_task["name"] and not included_task["name"].startswith(f"{include_prefix}_"):
-                                        included_task["name"] = f"{include_prefix}_{included_task['name']}"
+                                included_tasks = analyze_ansible_playbook(included_path, visited, source_prefix=include_prefix)
                                 all_tasks.extend(included_tasks)
                             except BuilderError as e:
                                 # If include fails, still analyze the include task itself
                                 task_meta = analyze_ansible_task(task, playbook_path)
                                 if task_meta:
+                                    if task_meta["name"] and not task_meta["name"].startswith(f"{source_prefix}_"):
+                                        task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
                                     all_tasks.append(task_meta)
                         else:
                             # Include path not found, analyze task as-is
                             task_meta = analyze_ansible_task(task, playbook_path)
                             if task_meta:
+                                if task_meta["name"] and not task_meta["name"].startswith(f"{source_prefix}_"):
+                                    task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
                                 all_tasks.append(task_meta)
                     else:
+                        # No include path string, analyze task as-is
                         task_meta = analyze_ansible_task(task, playbook_path)
                         if task_meta:
+                            if task_meta["name"] and not task_meta["name"].startswith(f"{source_prefix}_"):
+                                task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
                             all_tasks.append(task_meta)
                 # Handle include_role / import_role - recursively expand
                 elif "include_role" in task or "import_role" in task:
@@ -477,20 +487,28 @@ def analyze_ansible_playbook(
                                 # If role expansion fails, still analyze the role task itself
                                 task_meta = analyze_ansible_task(task, playbook_path)
                                 if task_meta:
+                                    if task_meta["name"] and not task_meta["name"].startswith(f"{source_prefix}_"):
+                                        task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
                                     all_tasks.append(task_meta)
                         else:
                             # Role not found, analyze task as-is
                             task_meta = analyze_ansible_task(task, playbook_path)
                             if task_meta:
+                                if task_meta["name"] and not task_meta["name"].startswith(f"{source_prefix}_"):
+                                    task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
                                 all_tasks.append(task_meta)
                     else:
                         task_meta = analyze_ansible_task(task, playbook_path)
                         if task_meta:
+                            if task_meta["name"] and not task_meta["name"].startswith(f"{source_prefix}_"):
+                                task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
                             all_tasks.append(task_meta)
                 else:
                     # Regular task
                     task_meta = analyze_ansible_task(task, playbook_path)
                     if task_meta:
+                        if task_meta["name"] and not task_meta["name"].startswith(f"{source_prefix}_"):
+                            task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
                         all_tasks.append(task_meta)
 
         # Analyze pre_tasks
@@ -498,6 +516,8 @@ def analyze_ansible_playbook(
             if isinstance(task, dict):
                 task_meta = analyze_ansible_task(task, playbook_path)
                 if task_meta:
+                    if task_meta["name"] and not task_meta["name"].startswith(f"{source_prefix}_"):
+                        task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
                     all_tasks.append(task_meta)
 
         # Analyze post_tasks
@@ -505,6 +525,8 @@ def analyze_ansible_playbook(
             if isinstance(task, dict):
                 task_meta = analyze_ansible_task(task, playbook_path)
                 if task_meta:
+                    if task_meta["name"] and not task_meta["name"].startswith(f"{source_prefix}_"):
+                        task_meta["name"] = f"{source_prefix}_{task_meta['name']}"
                     all_tasks.append(task_meta)
 
         # Infer dependencies from task order and variable usage
@@ -538,9 +560,11 @@ def build_dependency_map_from_playbooks(
 
     for playbook_path in playbook_paths:
         try:
-            tasks = analyze_ansible_playbook(playbook_path)
+            # Use playbook filename as prefix for all tasks from this playbook
+            playbook_prefix = Path(playbook_path).stem
+            tasks = analyze_ansible_playbook(playbook_path, source_prefix=playbook_prefix)
             if verbose:
-                print(f"Found {len(tasks)} tasks in {playbook_path}")
+                print(f"Found {len(tasks)} tasks in {playbook_path} (prefix: {playbook_prefix})")
             all_tasks.extend(tasks)
         except BuilderError as e:
             raise BuilderError(f"Failed to analyze {playbook_path}: {e}")
