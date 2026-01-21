@@ -141,16 +141,37 @@ Validate dependency map and required variables.
 Automatically generate dependency map from Ansible playbooks.
 
 This command analyzes your Ansible playbooks and automatically infers:
-- Task names from playbook tasks
-- Watch files from template/copy/file tasks
-- Required variables from variable references
-- Dependencies from task relationships
+- **Task names** from playbook tasks
+- **Watch files** from template/copy/file tasks and role directories
+- **Required variables** from variable references (`{{ var }}`)
+- **Dependencies** from:
+  - Task execution order (tasks that use variables registered by earlier tasks)
+  - Handler notifications (`notify` → handler relationships)
+  - When conditions (`X is defined` patterns)
+
+**Features:**
+- **Recursive expansion**: Automatically expands `include_tasks`, `import_tasks`, `include_role`, and `import_role`
+- **Role analysis**: Analyzes role tasks and handlers from `roles/{name}/tasks/main.yml` and `roles/{name}/handlers/main.yml`
+- **Multiple playbooks**: Accepts multiple playbooks via multiple `--playbook` flags
+- **Dependency inference**: Automatically discovers dependencies from `register` variables and task order
 
 **Options:**
 - `--playbook, -p`: Path to Ansible playbook file(s). Can be specified multiple times.
 - `--directory, -d`: Path to directory containing Ansible playbooks
 - `--output, -o`: Output path for generated dependency map (default: dependency_map.yml)
 - `--overwrite`: Overwrite existing dependency_map.yml if it exists
+
+**Examples:**
+```bash
+# Build from multiple playbooks
+said build --playbook site.yml --playbook roles/web/tasks/main.yml
+
+# Build from directory (recursively analyzes all playbooks)
+said build --directory ./playbooks
+
+# Custom output location
+said build --directory ./ansible --output custom_map.yml
+```
 
 ## Dependency Map Format
 

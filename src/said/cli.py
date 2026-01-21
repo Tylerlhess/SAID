@@ -492,7 +492,8 @@ def build(
             build_dependency_map_from_playbooks,
         )
 
-        playbook_paths = list(playbook) if playbook else []
+        # Convert tuple to list (click's multiple=True returns a tuple)
+        playbook_paths = list(playbook) if playbook and len(playbook) > 0 else []
 
         # Check if output file exists
         if output.exists() and not overwrite:
@@ -514,6 +515,8 @@ def build(
             dep_map = build_dependency_map_from_directory(directory, output)
         elif playbook_paths:
             click.echo(f"Analyzing {len(playbook_paths)} playbook(s)...")
+            for i, pb in enumerate(playbook_paths, 1):
+                click.echo(f"  {i}. {pb}")
             dep_map = build_dependency_map_from_playbooks(playbook_paths, output)
         else:
             click.echo(

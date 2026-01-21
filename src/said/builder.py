@@ -2,7 +2,8 @@
 
 This module provides functionality to automatically analyze Ansible playbooks
 and generate dependency maps by inferring relationships from task structures,
-file paths, tags, handlers, and dependencies.
+file paths, tags, handlers, and dependencies. Recursively expands included
+playbooks and roles.
 """
 
 import re
@@ -71,9 +72,17 @@ def analyze_ansible_task(task: Dict, playbook_path: Path) -> Optional[Dict]:
 
     # Copy tasks
     if "copy" in task:
-        src = task["copy"].get("src") if isinstance(task["copy"], dict) else task["copy"]
-        if src:
-            watch_files.add(str(playbook_path.parent / src))
+        copy_dict = task["copy"]
+        if isinstance(copy_dict, dict):
+            src = copy_dict.get("src")
+            dest = copy_dict.get("dest")
+            if src:
+                watch_files.add(str(playbook_path.parent / src))
+            if dest:
+                watch_files.add(dest)
+        else:
+            # Simple string format
+            watch_files.add(str(playbook_path.parent / copy_dict))
 
     # File tasks
     if "file" in task:
@@ -121,7 +130,7 @@ def analyze_ansible_task(task: Dict, playbook_path: Path) -> Optional[Dict]:
             if var_name not in ["item", "ansible", "hostvars", "group_names", "groups"]:
                 requires_vars.add(var_name)
 
-    # Build metadata
+        # Build metadata
     result = {
         "name": metadata["name"],
         "provides": [metadata["name"]],  # Default: task provides itself as resource
@@ -131,22 +140,225 @@ def analyze_ansible_task(task: Dict, playbook_path: Path) -> Optional[Dict]:
         "requires_vars": sorted(list(requires_vars)) if requires_vars else [],
     }
 
-    # Extract dependencies from when conditions or explicit dependencies
+    # Extract dependencies from when conditions
     if "when" in task:
         when_str = str(task["when"])
         # Look for references to other tasks/resources
-        # This is a simple heuristic - could be enhanced
-        deps = re.findall(r'(\w+)\s+is\s+defined', when_str)
+        # Pattern: "resource_name is defined" or "resource_name is not defined"
+        deps = re.findall(r'(\w+)\s+is\s+(?:not\s+)?defined', when_str)
         result["depends_on"].extend(deps)
 
     return result
 
 
-def analyze_ansible_playbook(playbook_path: Union[str, Path]) -> List[Dict]:
+def find_role_path(role_name: str, base_path: Path) -> Optional[Path]:
+    """Find the path to a role directory.
+
+    Searches in common Ansible role locations:
+    - roles/{role_name}/
+    - {base_path}/roles/{role_name}/
+    - {base_path}/../roles/{role_name}/
+
+    Args:
+        role_name: Name of the role to find.
+        base_path: Base path to search from.
+
+    Returns:
+        Path to role directory if found, None otherwise.
+    """
+    search_paths = [
+        base_path / "roles" / role_name,
+        base_path.parent / "roles" / role_name,
+        base_path.parent.parent / "roles" / role_name,
+        Path("roles") / role_name,
+        Path(".") / "roles" / role_name,
+    ]
+
+    for search_path in search_paths:
+        if search_path.exists() and search_path.is_dir():
+            return search_path
+
+    return None
+
+
+def resolve_playbook_path(include_path: str, base_path: Path) -> Optional[Path]:
+    """Resolve a relative playbook include path to an absolute path.
+
+    Args:
+        include_path: Relative path from include_tasks/import_tasks.
+        base_path: Base path of the current playbook.
+
+    Returns:
+        Resolved Path if found, None otherwise.
+    """
+    # Try relative to current playbook
+    candidate = base_path.parent / include_path
+    if candidate.exists():
+        return candidate
+
+    # Try relative to common playbook locations
+    search_paths = [
+        base_path.parent / "tasks" / include_path,
+        base_path.parent / include_path,
+        Path("tasks") / include_path,
+        Path(".") / include_path,
+    ]
+
+    for search_path in search_paths:
+        if search_path.exists():
+            return search_path
+
+    return None
+
+
+def analyze_role(role_path: Path, base_path: Path, visited: Set[Path]) -> List[Dict]:
+    """Recursively analyze an Ansible role and extract all tasks.
+
+    Args:
+        role_path: Path to the role directory.
+        base_path: Base path for resolving relative paths.
+        visited: Set of already visited paths to prevent infinite recursion.
+
+    Returns:
+        List of task metadata dictionaries from the role.
+    """
+    if role_path in visited:
+        return []  # Prevent infinite recursion
+
+    visited.add(role_path)
+    all_tasks = []
+
+    # Analyze main tasks
+    main_tasks_path = role_path / "tasks" / "main.yml"
+    if not main_tasks_path.exists():
+        main_tasks_path = role_path / "tasks" / "main.yaml"
+
+    if main_tasks_path.exists():
+        try:
+            tasks = analyze_ansible_playbook(main_tasks_path, visited)
+            all_tasks.extend(tasks)
+        except BuilderError:
+            pass  # Skip if role tasks can't be parsed
+
+    # Analyze handlers
+    handlers_path = role_path / "handlers" / "main.yml"
+    if not handlers_path.exists():
+        handlers_path = role_path / "handlers" / "main.yaml"
+
+    if handlers_path.exists():
+        try:
+            tasks = analyze_ansible_playbook(handlers_path, visited)
+            # Mark handlers appropriately
+            for task in tasks:
+                if "triggers" not in task or not task["triggers"]:
+                    task["triggers"] = [f"notify_{task['name']}"]
+            all_tasks.extend(tasks)
+        except BuilderError:
+            pass
+
+    return all_tasks
+
+
+def infer_dependencies_from_playbook(
+    all_tasks: List[Dict], play_tasks: List[Dict]
+) -> None:
+    """Infer dependencies between tasks based on execution order and variable usage.
+
+    This function analyzes task order and register variables to infer dependencies.
+    If task B uses a variable registered by task A, task B depends on task A.
+    Also infers handler triggers from notify statements.
+
+    Args:
+        all_tasks: List of all task metadata dictionaries (will be modified in-place).
+        play_tasks: List of tasks from the playbook in execution order.
+    """
+    if not all_tasks or not play_tasks:
+        return
+
+    # Build a map of task names to their metadata
+    task_map = {task["name"]: task for task in all_tasks}
+
+    # Track registered variables and which tasks register them
+    registered_vars: Dict[str, str] = {}  # var_name -> task_name
+
+    # Analyze tasks in order
+    for task_dict in play_tasks:
+        if not isinstance(task_dict, dict):
+            continue
+
+        task_name = None
+        if "name" in task_dict:
+            task_name = task_dict["name"]
+        elif "include_tasks" in task_dict:
+            task_name = task_dict["include_tasks"]
+        elif "import_tasks" in task_dict:
+            task_name = task_dict["import_tasks"]
+        elif "include_role" in task_dict:
+            role_dict = task_dict["include_role"]
+            task_name = role_dict.get("name") if isinstance(role_dict, dict) else role_dict
+        elif "import_role" in task_dict:
+            role_dict = task_dict["import_role"]
+            task_name = role_dict.get("name") if isinstance(role_dict, dict) else role_dict
+
+        if not task_name or task_name not in task_map:
+            continue
+
+        task_meta = task_map[task_name]
+
+        # Check for register: this task registers a variable
+        if "register" in task_dict:
+            reg_var = task_dict["register"]
+            registered_vars[reg_var] = task_name
+
+        # Check for variables used in this task that were registered by previous tasks
+        task_str = yaml.dump(task_dict, default_flow_style=False)
+        var_pattern = r'\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*[|}]'
+
+        for match in re.finditer(var_pattern, task_str):
+            var_name = match.group(1)
+            # Skip common Ansible variables
+            if var_name in ["item", "ansible", "hostvars", "group_names", "groups", "inventory_hostname"]:
+                continue
+
+            # If this variable was registered by another task, add dependency
+            if var_name in registered_vars:
+                dep_task = registered_vars[var_name]
+                if dep_task != task_name:  # Don't depend on self
+                    if dep_task not in task_meta["depends_on"]:
+                        task_meta["depends_on"].append(dep_task)
+
+        # Check for notify: this task triggers handlers
+        if "notify" in task_dict:
+            notify_targets = task_dict["notify"]
+            if isinstance(notify_targets, list):
+                for handler_name in notify_targets:
+                    # Find handler task and add trigger relationship
+                    for other_task in all_tasks:
+                        if other_task["name"] == handler_name:
+                            if "triggers" not in other_task:
+                                other_task["triggers"] = []
+                            if task_name not in other_task["triggers"]:
+                                other_task["triggers"].append(task_name)
+            elif isinstance(notify_targets, str):
+                # Single handler
+                for other_task in all_tasks:
+                    if other_task["name"] == notify_targets:
+                        if "triggers" not in other_task:
+                            other_task["triggers"] = []
+                        if task_name not in other_task["triggers"]:
+                            other_task["triggers"].append(task_name)
+
+
+def analyze_ansible_playbook(
+    playbook_path: Union[str, Path], visited: Optional[Set[Path]] = None
+) -> List[Dict]:
     """Analyze an Ansible playbook and extract task metadata.
+
+    Recursively expands included playbooks and roles.
 
     Args:
         playbook_path: Path to the Ansible playbook file.
+        visited: Set of already visited paths to prevent infinite recursion.
 
     Returns:
         List of task metadata dictionaries.
@@ -154,10 +366,18 @@ def analyze_ansible_playbook(playbook_path: Union[str, Path]) -> List[Dict]:
     Raises:
         BuilderError: If the playbook cannot be parsed or analyzed.
     """
-    playbook_path = Path(playbook_path)
+    if visited is None:
+        visited = set()
+
+    playbook_path = Path(playbook_path).resolve()
+
+    if playbook_path in visited:
+        return []  # Prevent infinite recursion
 
     if not playbook_path.exists():
         raise BuilderError(f"Playbook not found: {playbook_path}")
+
+    visited.add(playbook_path)
 
     try:
         with open(playbook_path, "r", encoding="utf-8") as f:
@@ -199,12 +419,67 @@ def analyze_ansible_playbook(playbook_path: Union[str, Path]) -> List[Dict]:
         pre_tasks = play.get("pre_tasks", [])
         post_tasks = play.get("post_tasks", [])
 
-        # Analyze regular tasks
+        # Analyze regular tasks (with recursive expansion)
         for task in tasks:
             if isinstance(task, dict):
-                task_meta = analyze_ansible_task(task, playbook_path)
-                if task_meta:
-                    all_tasks.append(task_meta)
+                # Handle include_tasks / import_tasks - recursively expand
+                if "include_tasks" in task or "import_tasks" in task:
+                    include_path_str = task.get("include_tasks") or task.get("import_tasks")
+                    if include_path_str:
+                        included_path = resolve_playbook_path(include_path_str, playbook_path)
+                        if included_path:
+                            try:
+                                included_tasks = analyze_ansible_playbook(included_path, visited)
+                                all_tasks.extend(included_tasks)
+                            except BuilderError:
+                                # If include fails, still analyze the include task itself
+                                task_meta = analyze_ansible_task(task, playbook_path)
+                                if task_meta:
+                                    all_tasks.append(task_meta)
+                        else:
+                            # Include path not found, analyze task as-is
+                            task_meta = analyze_ansible_task(task, playbook_path)
+                            if task_meta:
+                                all_tasks.append(task_meta)
+                    else:
+                        task_meta = analyze_ansible_task(task, playbook_path)
+                        if task_meta:
+                            all_tasks.append(task_meta)
+                # Handle include_role / import_role - recursively expand
+                elif "include_role" in task or "import_role" in task:
+                    role_name = None
+                    if "include_role" in task:
+                        role_dict = task["include_role"]
+                        role_name = role_dict.get("name") if isinstance(role_dict, dict) else role_dict
+                    elif "import_role" in task:
+                        role_dict = task["import_role"]
+                        role_name = role_dict.get("name") if isinstance(role_dict, dict) else role_dict
+
+                    if role_name:
+                        role_path = find_role_path(role_name, playbook_path)
+                        if role_path:
+                            try:
+                                role_tasks = analyze_role(role_path, playbook_path, visited)
+                                all_tasks.extend(role_tasks)
+                            except BuilderError:
+                                # If role expansion fails, still analyze the role task itself
+                                task_meta = analyze_ansible_task(task, playbook_path)
+                                if task_meta:
+                                    all_tasks.append(task_meta)
+                        else:
+                            # Role not found, analyze task as-is
+                            task_meta = analyze_ansible_task(task, playbook_path)
+                            if task_meta:
+                                all_tasks.append(task_meta)
+                    else:
+                        task_meta = analyze_ansible_task(task, playbook_path)
+                        if task_meta:
+                            all_tasks.append(task_meta)
+                else:
+                    # Regular task
+                    task_meta = analyze_ansible_task(task, playbook_path)
+                    if task_meta:
+                        all_tasks.append(task_meta)
 
         # Analyze pre_tasks
         for task in pre_tasks:
@@ -219,6 +494,12 @@ def analyze_ansible_playbook(playbook_path: Union[str, Path]) -> List[Dict]:
                 task_meta = analyze_ansible_task(task, playbook_path)
                 if task_meta:
                     all_tasks.append(task_meta)
+
+        # Infer dependencies from task order and variable usage
+        # Combine all tasks in execution order for analysis
+        all_play_tasks = pre_tasks + tasks + post_tasks
+        if all_tasks and all_play_tasks:
+            infer_dependencies_from_playbook(all_tasks, all_play_tasks)
 
     return all_tasks
 

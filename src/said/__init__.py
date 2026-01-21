@@ -50,6 +50,8 @@ from said.builder import (
     analyze_ansible_task,
     build_dependency_map_from_directory,
     build_dependency_map_from_playbooks,
+    find_role_path,
+    resolve_playbook_path,
 )
 
 __all__ = [
@@ -105,4 +107,6 @@ __all__ = [
     "analyze_ansible_task",
     "build_dependency_map_from_directory",
     "build_dependency_map_from_playbooks",
+    "find_role_path",
+    "resolve_playbook_path",
 ]
