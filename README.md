@@ -182,6 +182,7 @@ This command analyzes your Ansible playbooks and automatically infers:
 - `--groupvars`: Path to group_vars file or directory. Can be specified multiple times.
 - `--hostvars`: Path to host_vars file or directory. Can be specified multiple times.
 - `--no-auto-discover-vars`: Disable auto-discovery of group_vars and host_vars
+- `--json-errors`: Output errors in JSON format (only if errors occur)
 
 **Examples:**
 ```bash

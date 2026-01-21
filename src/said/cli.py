@@ -203,10 +203,50 @@ def analyze(
                 click.echo("\nNo tasks to execute.")
 
     except CoordinatorError as e:
-        click.echo(f"Error: {e}", err=True)
+        if json_errors or output_json:
+            import json
+            from said.error_collector import DependencyError, DependencyErrorReport
+            
+            error_report = DependencyErrorReport(
+                errors=[
+                    DependencyError(
+                        error_type="coordinator_error",
+                        task_name="workflow",
+                        message=str(e),
+                        details={"error_class": type(e).__name__},
+                    )
+                ],
+                total_errors=1,
+                error_summary={"coordinator_error": 1},
+            )
+            click.echo(error_report.to_json())
+        else:
+            click.echo(f"Error: {e}", err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"Unexpected error: {e}", err=True)
+        if json_errors or output_json:
+            import json
+            from said.error_collector import DependencyError, DependencyErrorReport
+            import traceback
+            
+            error_report = DependencyErrorReport(
+                errors=[
+                    DependencyError(
+                        error_type="unexpected_error",
+                        task_name="workflow",
+                        message=str(e),
+                        details={
+                            "error_class": type(e).__name__,
+                            "traceback": traceback.format_exc(),
+                        },
+                    )
+                ],
+                total_errors=1,
+                error_summary={"unexpected_error": 1},
+            )
+            click.echo(error_report.to_json())
+        else:
+            click.echo(f"Unexpected error: {e}", err=True)
         sys.exit(1)
 
 
@@ -428,17 +468,97 @@ def execute(
                 sys.exit(exit_code)
 
         except KeyboardInterrupt:
-            click.echo("\n\nExecution interrupted by user.", err=True)
+            if json_errors:
+                import json
+                from said.error_collector import DependencyError, DependencyErrorReport
+                
+                error_report = DependencyErrorReport(
+                    errors=[
+                        DependencyError(
+                            error_type="execution_interrupted",
+                            task_name="ansible_execution",
+                            message="Execution interrupted by user",
+                            details={},
+                        )
+                    ],
+                    total_errors=1,
+                    error_summary={"execution_interrupted": 1},
+                )
+                click.echo(error_report.to_json())
+            else:
+                click.echo("\n\nExecution interrupted by user.", err=True)
             sys.exit(130)
         except Exception as e:
-            click.echo(f"\n✗ Error executing command: {e}", err=True)
+            if json_errors:
+                import json
+                from said.error_collector import DependencyError, DependencyErrorReport
+                import traceback
+                
+                error_report = DependencyErrorReport(
+                    errors=[
+                        DependencyError(
+                            error_type="execution_error",
+                            task_name="ansible_execution",
+                            message=str(e),
+                            details={
+                                "error_class": type(e).__name__,
+                                "traceback": traceback.format_exc(),
+                            },
+                        )
+                    ],
+                    total_errors=1,
+                    error_summary={"execution_error": 1},
+                )
+                click.echo(error_report.to_json())
+            else:
+                click.echo(f"\n✗ Error executing command: {e}", err=True)
             sys.exit(1)
 
     except CoordinatorError as e:
-        click.echo(f"Error: {e}", err=True)
+        if json_errors:
+            import json
+            from said.error_collector import DependencyError, DependencyErrorReport
+            
+            error_report = DependencyErrorReport(
+                errors=[
+                    DependencyError(
+                        error_type="coordinator_error",
+                        task_name="workflow",
+                        message=str(e),
+                        details={"error_class": type(e).__name__},
+                    )
+                ],
+                total_errors=1,
+                error_summary={"coordinator_error": 1},
+            )
+            click.echo(error_report.to_json())
+        else:
+            click.echo(f"Error: {e}", err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"Unexpected error: {e}", err=True)
+        if json_errors:
+            import json
+            from said.error_collector import DependencyError, DependencyErrorReport
+            import traceback
+            
+            error_report = DependencyErrorReport(
+                errors=[
+                    DependencyError(
+                        error_type="unexpected_error",
+                        task_name="workflow",
+                        message=str(e),
+                        details={
+                            "error_class": type(e).__name__,
+                            "traceback": traceback.format_exc(),
+                        },
+                    )
+                ],
+                total_errors=1,
+                error_summary={"unexpected_error": 1},
+            )
+            click.echo(error_report.to_json())
+        else:
+            click.echo(f"Unexpected error: {e}", err=True)
         sys.exit(1)
 
 
@@ -592,7 +712,29 @@ def validate(
                 click.echo("✓ All required variables are defined")
 
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        if output_json:
+            import json
+            from said.error_collector import DependencyError, DependencyErrorReport
+            import traceback
+            
+            error_report = DependencyErrorReport(
+                errors=[
+                    DependencyError(
+                        error_type="validation_error",
+                        task_name="validation",
+                        message=str(e),
+                        details={
+                            "error_class": type(e).__name__,
+                            "traceback": traceback.format_exc(),
+                        },
+                    )
+                ],
+                total_errors=1,
+                error_summary={"validation_error": 1},
+            )
+            click.echo(error_report.to_json())
+        else:
+            click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
 
@@ -650,6 +792,11 @@ def validate(
     is_flag=True,
     help="Disable auto-discovery of group_vars and host_vars.",
 )
+@click.option(
+    "--json-errors",
+    is_flag=True,
+    help="Output errors in JSON format (only if errors occur).",
+)
 def build(
     playbook: tuple,
     directory: Optional[Path],
@@ -660,6 +807,7 @@ def build(
     groupvars: tuple,
     hostvars: tuple,
     no_auto_discover_vars: bool,
+    json_errors: bool,
 ):
     """Automatically build dependency map from Ansible playbooks.
 
@@ -764,10 +912,28 @@ def build(
                 playbook_paths, output, verbose=verbose, known_variables=known_variables
             )
         else:
-            click.echo(
-                "Error: Must specify either --directory or --playbook",
-                err=True,
-            )
+            if json_errors:
+                import json
+                from said.error_collector import DependencyError, DependencyErrorReport
+                
+                error_report = DependencyErrorReport(
+                    errors=[
+                        DependencyError(
+                            error_type="build_error",
+                            task_name="build",
+                            message="Must specify either --directory or --playbook",
+                            details={},
+                        )
+                    ],
+                    total_errors=1,
+                    error_summary={"build_error": 1},
+                )
+                click.echo(error_report.to_json())
+            else:
+                click.echo(
+                    "Error: Must specify either --directory or --playbook",
+                    err=True,
+                )
             sys.exit(1)
 
         click.echo(f"\n✓ Generated dependency map with {len(dep_map.tasks)} tasks")
@@ -780,10 +946,53 @@ def build(
         click.echo("  4. Run 'said validate' to check the dependency map")
 
     except BuilderError as e:
-        click.echo(f"Error: {e}", err=True)
+        if json_errors:
+            import json
+            from said.error_collector import DependencyError, DependencyErrorReport
+            
+            error_report = DependencyErrorReport(
+                errors=[
+                    DependencyError(
+                        error_type="builder_error",
+                        task_name="build",
+                        message=str(e),
+                        details={"error_class": type(e).__name__},
+                    )
+                ],
+                total_errors=1,
+                error_summary={"builder_error": 1},
+            )
+            click.echo(error_report.to_json())
+        else:
+            click.echo(f"Error: {e}", err=True)
         sys.exit(1)
     except Exception as e:
-        click.echo(f"Unexpected error: {e}", err=True)
+        if json_errors:
+            import json
+            from said.error_collector import DependencyError, DependencyErrorReport
+            import traceback
+            
+            error_report = DependencyErrorReport(
+                errors=[
+                    DependencyError(
+                        error_type="unexpected_error",
+                        task_name="build",
+                        message=str(e),
+                        details={
+                            "error_class": type(e).__name__,
+                            "traceback": traceback.format_exc(),
+                        },
+                    )
+                ],
+                total_errors=1,
+                error_summary={"unexpected_error": 1},
+            )
+            click.echo(error_report.to_json())
+        else:
+            click.echo(f"Unexpected error: {e}", err=True)
+            import traceback
+            if verbose:
+                click.echo(traceback.format_exc(), err=True)
         sys.exit(1)
 
 
