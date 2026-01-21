@@ -1,0 +1,93 @@
+# Git-Heavy Development Workflow
+
+## Core Principle
+Git is the source of truth for project state. Use git extensively to:
+- Track progress
+- Understand context
+- Pass state between iterations
+- Maintain a clear history
+
+## Git Usage Rules
+
+### Commit Frequency
+- **Commit after every logical unit of work** - Don't wait for "perfect" code
+- **Commit working code** - Even if incomplete, commit what works
+- **Commit test files** - Tests are as important as implementation
+- **Commit documentation updates** - Keep docs in sync with code
+
+### Commit Message Format
+Follow the format specified in BUILD_PLAN.md:
+- `feat: <description>` - New features
+- `fix: <description>` - Bug fixes
+- `test: <description>` - Test additions/changes
+- `docs: <description>` - Documentation
+- `refactor: <description>` - Code refactoring
+- `perf: <description>` - Performance improvements
+
+Examples:
+- `feat: implement git change detector module`
+- `test: add unit tests for dependency parser`
+- `docs: add usage examples to README`
+
+### Before Making Changes
+1. **Check git status** - `git status` to see current state
+2. **Review git log** - `git log --oneline -10` to see recent commits
+3. **Check git diff** - `git diff` to see uncommitted changes
+4. **Understand branch state** - Know what branch you're on
+
+### Using Git for Context
+- **Read git log** to understand what's been implemented
+- **Use git diff** to see what changed between commits
+- **Check git show** to understand specific commits
+- **Review file history** to see how files evolved
+
+### Branch Strategy
+- Work on `main` branch for this project (or follow project conventions)
+- Create feature branches only if explicitly needed
+- Keep commits linear and clear
+
+### Git Commands to Use Regularly
+```bash
+# Check current state
+git status
+git log --oneline -10
+git diff
+
+# After making changes
+git add <files>
+git commit -m "feat: description"
+git log --oneline -1  # Verify commit
+
+# To understand context
+git show HEAD
+git diff HEAD~1 HEAD
+git log --all --graph --oneline
+```
+
+### Commit Checklist
+Before committing, verify:
+- [ ] Code works (tests pass if applicable)
+- [ ] Changes are focused and logical
+- [ ] Commit message follows format
+- [ ] No temporary/debug code included
+- [ ] BUILD_PLAN.md updated if task completed
+
+### State Tracking via Git
+- **Last successful state** = last commit on main branch
+- **Current progress** = uncommitted changes + recent commits
+- **Project history** = full git log
+- **Context between iterations** = git diff and git log
+
+### Integration with State Store
+- The state store (Redis/File) tracks deployment state
+- Git tracks development state
+- Both are sources of truth for different purposes
+- Use git to understand code evolution
+- Use state store to understand deployment history
+
+## Anti-Patterns to Avoid
+- ❌ Making many changes without committing
+- ❌ Vague commit messages
+- ❌ Committing unrelated changes together
+- ❌ Ignoring git status before starting work
+- ❌ Not using git to understand project state

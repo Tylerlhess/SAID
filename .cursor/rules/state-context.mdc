@@ -1,0 +1,107 @@
+# State-Based Context Passing
+
+## Core Principle
+Context is passed by reading the current state of the repository, not by maintaining conversation memory. Each iteration should be self-contained by reading:
+- File contents
+- Git history
+- BUILD_PLAN.md status
+- Existing code patterns
+
+## State Reading Rules
+
+### Before Any Action
+1. **Read BUILD_PLAN.md** - Understand what should be done
+2. **Check git status** - See what's changed
+3. **Review git log** - Understand recent work
+4. **Read relevant source files** - Understand current implementation
+5. **Check test files** - Understand test patterns
+
+### Reading Files for Context
+- **Always read files before modifying** - Never assume contents
+- **Read related files** - Understand how components interact
+- **Read test files** - Understand expected behavior
+- **Read configuration files** - Understand project setup
+
+### Using Git for State
+- **git log** - What has been done
+- **git diff** - What has changed
+- **git show** - Specific commit details
+- **git status** - Current working state
+
+### Inferring State from Code
+- **Follow existing patterns** - Match code style and structure
+- **Read imports** - Understand dependencies
+- **Read function signatures** - Understand interfaces
+- **Read docstrings** - Understand intended behavior
+
+### State Discovery Workflow
+```
+1. Read BUILD_PLAN.md → Find next task
+2. Check git log → See what's been done
+3. Read relevant source files → Understand current code
+4. Read test files → Understand test patterns
+5. Implement next task → Following existing patterns
+6. Commit changes → Update state
+```
+
+### Context Sources (Priority Order)
+1. **BUILD_PLAN.md** - What should be done
+2. **Git history** - What has been done
+3. **Source code** - How it's implemented
+4. **Test code** - How it's tested
+5. **Documentation** - How it's documented
+
+### State Validation
+Before implementing:
+- Verify files exist that should exist (from BUILD_PLAN.md)
+- Verify code follows existing patterns
+- Verify tests exist for similar functionality
+- Verify git history shows expected progress
+
+### State Updates
+After implementing:
+- Files reflect new state
+- Git commit reflects new state
+- BUILD_PLAN.md reflects new state
+- Tests reflect new state
+
+### No Assumptions Rule
+- ❌ Don't assume a file exists - Read it first
+- ❌ Don't assume code structure - Read existing code
+- ❌ Don't assume patterns - Follow what exists
+- ❌ Don't assume state - Verify with git/files
+
+### State Reading Checklist
+Before starting work:
+- [ ] Read BUILD_PLAN.md
+- [ ] Check git status
+- [ ] Review recent git log
+- [ ] Read relevant source files
+- [ ] Read relevant test files
+- [ ] Understand current project structure
+
+## Examples
+
+### Good: Reading State First
+```
+1. Read BUILD_PLAN.md → Task 3: Git Integration Module
+2. Check git log → Tasks 1-2 completed
+3. Read src/said/__init__.py → See package structure
+4. Read tests/test_*.py → See test patterns
+5. Implement git_detector.py → Following patterns
+```
+
+### Bad: Assuming State
+```
+1. Assume package structure exists
+2. Implement without reading existing code
+3. Use different patterns than existing code
+4. Don't check what's been done
+```
+
+## Integration with Recursive Development
+- State reading enables recursive development
+- Each iteration is independent
+- Context comes from repository state
+- No conversation memory needed
+- Git history tells the story

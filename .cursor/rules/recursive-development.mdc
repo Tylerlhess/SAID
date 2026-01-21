@@ -1,0 +1,74 @@
+# Recursive Development Workflow (Ralph-Wiggum Loop)
+
+## Core Principle
+This project uses a recursive, iterative development model where the AI agent builds the project incrementally by:
+1. Reading the current state (files, git history, BUILD_PLAN.md)
+2. Understanding what needs to be done next
+3. Making small, focused changes
+4. Committing those changes to git
+5. Repeating until the project is complete
+
+## Workflow Rules
+
+### Before Starting Any Task
+1. **Read BUILD_PLAN.md** - Understand the current phase and next task
+2. **Check git status** - See what's been committed and what's pending
+3. **Review git log** - Understand recent changes and project state
+4. **Read relevant existing code** - Understand the current codebase structure
+5. **Identify the next uncompleted task** - Check BUILD_PLAN.md for `[ ]` unchecked items
+
+### During Task Execution
+1. **Work on ONE task at a time** - Complete it fully before moving on
+2. **Keep changes small and focused** - Each commit should represent a logical unit
+3. **Write tests alongside code** - Don't skip testing
+4. **Run tests before committing** - Ensure code works
+5. **Update BUILD_PLAN.md** - Check off completed tasks `[x]`
+
+### After Completing a Task
+1. **Review your changes** - Use `git diff` to see what changed
+2. **Commit with descriptive message** - Follow the commit message format from BUILD_PLAN.md
+3. **Verify the commit** - Check `git log` to confirm
+4. **Update BUILD_PLAN.md** - Mark task as complete
+5. **Commit BUILD_PLAN.md update** - Keep the plan in sync
+
+### State-Based Context Passing
+- **Never assume** what files exist or what code is written
+- **Always read** the current state of files before modifying
+- **Check git history** to understand how the codebase evolved
+- **Read BUILD_PLAN.md** to understand what should exist
+- **Infer from existing code** - Follow patterns already established
+
+### Task Size Guidelines
+- Each task should be completable in 30-60 minutes
+- If a task seems too large, break it down further
+- A task is complete when:
+  - Code is written and tested
+  - Tests pass
+  - Documentation is updated if needed
+  - Changes are committed to git
+
+### Error Recovery
+- If a task fails, commit the partial work with a clear message
+- Document what went wrong in the commit message
+- Move to the next task or fix the issue in a follow-up commit
+- Never leave the repository in a broken state (uncommitted broken code)
+
+### Iteration Pattern
+```
+1. Read state (files, git, BUILD_PLAN)
+2. Understand next task
+3. Implement task
+4. Test implementation
+5. Commit changes
+6. Update BUILD_PLAN
+7. Repeat
+```
+
+## Anti-Patterns to Avoid
+- ❌ Working on multiple tasks simultaneously
+- ❌ Making large, sweeping changes
+- ❌ Skipping tests
+- ❌ Committing broken code
+- ❌ Assuming project state without reading files
+- ❌ Ignoring BUILD_PLAN.md
+- ❌ Writing code that doesn't match existing patterns
