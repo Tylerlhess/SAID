@@ -169,12 +169,29 @@ def analyze_ansible_task(task: Dict, playbook_path: Path) -> Optional[Dict]:
             requires_vars.add(var_name)
 
     # Extract when conditions (may reference variables)
+    # Also handle "variable is defined" patterns - these are variables, not task dependencies
     if "when" in task:
         when_str = str(task["when"])
+        # Extract variables from {{ var }} patterns
         for match in re.finditer(var_pattern, when_str):
             var_name = match.group(1)
             if var_name not in ["item", "ansible", "hostvars", "group_names", "groups"]:
                 requires_vars.add(var_name)
+        
+        # Extract variables from "variable is defined" or "variable is not defined" patterns
+        # These are variable checks, not task dependencies
+        defined_pattern = r'(\w+(?:\.\w+)*)\s+is\s+(?:not\s+)?defined'
+        for match in re.finditer(defined_pattern, when_str):
+            var_name = match.group(1)
+            # Handle nested variables like "server_map.service"
+            if '.' in var_name:
+                # Add both the base variable and the full path
+                base_var = var_name.split('.')[0]
+                requires_vars.add(base_var)
+                requires_vars.add(var_name)
+            else:
+                if var_name not in ["item", "ansible", "hostvars", "group_names", "groups", "inventory_hostname"]:
+                    requires_vars.add(var_name)
 
         # Build metadata
     result = {
@@ -204,12 +221,10 @@ def analyze_ansible_task(task: Dict, playbook_path: Path) -> Optional[Dict]:
             break
 
     # Extract dependencies from when conditions
-    if "when" in task:
-        when_str = str(task["when"])
-        # Look for references to other tasks/resources
-        # Pattern: "resource_name is defined" or "resource_name is not defined"
-        deps = re.findall(r'(\w+)\s+is\s+(?:not\s+)?defined', when_str)
-        result["depends_on"].extend(deps)
+    # NOTE: Variables used in "is defined" checks are VARIABLES, not task dependencies
+    # They should go in requires_vars, not depends_on
+    # Only actual task resources (from task.provides) should be in depends_on
+    # We've already extracted variables from when conditions above, so we don't need to do it again here
 
     return result
 

@@ -117,17 +117,37 @@ class DependencyMap:
                 )
 
         # Validate that all 'depends_on' reference existing 'provides' values
+        # NOTE: Variables (like inventory variables) should NOT be in depends_on
+        # They should be in requires_vars instead. If a variable is in depends_on,
+        # it's likely a mistake from parsing when conditions.
         all_provides = set()
         for task in self.tasks:
             all_provides.update(task.provides)
 
         for task in self.tasks:
             invalid_deps = set(task.depends_on) - all_provides
+            
+            # Check if any invalid deps might be variables (common variable names)
+            # If so, suggest they should be in requires_vars instead
+            potential_variables = set()
+            actual_invalid = set()
+            for dep in invalid_deps:
+                # Heuristic: if it looks like a variable name (not a task name pattern)
+                # and it's not in provides, it's likely a variable that was incorrectly
+                # added to depends_on from a when condition
+                if dep not in all_provides:
+                    # Check if it's a nested variable reference (e.g., "server_map.service")
+                    if '.' in dep or dep.replace('_', '').isalnum():
+                        potential_variables.add(dep)
+                    else:
+                        actual_invalid.add(dep)
+            
             if invalid_deps:
-                raise SchemaError(
-                    f"Task '{task.name}' depends on non-existent resources: {invalid_deps}. "
-                    "Available resources: " + ", ".join(sorted(all_provides))
-                )
+                error_msg = f"Task '{task.name}' depends on non-existent resources: {invalid_deps}. "
+                if potential_variables:
+                    error_msg += f"Note: {potential_variables} appear to be variables (possibly from 'when' conditions) and should be in 'requires_vars', not 'depends_on'. "
+                error_msg += "Available resources: " + ", ".join(sorted(all_provides))
+                raise SchemaError(error_msg)
 
     def get_task_by_name(self, name: str) -> Optional[TaskMetadata]:
         """Get a task by its name.

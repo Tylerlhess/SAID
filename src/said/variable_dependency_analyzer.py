@@ -66,17 +66,26 @@ def build_producers_dictionary(
 
     # Add known variables from inventory/vars files
     if known_variables:
-        for var_name in known_variables.keys():
-            if var_name not in producers:
-                producers[var_name] = []
-            # Mark as provided by inventory/vars
-            producers[var_name].append(
-                VariableProducer(
-                    source_type="inventory",
-                    source_name="inventory_vars",
-                    source_path=None,
+        # Flatten nested dictionaries to handle variables like server_map.service
+        def flatten_vars(var_dict, prefix=""):
+            """Recursively flatten nested variable dictionaries."""
+            for key, value in var_dict.items():
+                full_key = f"{prefix}.{key}" if prefix else key
+                # Add the variable itself
+                if full_key not in producers:
+                    producers[full_key] = []
+                producers[full_key].append(
+                    VariableProducer(
+                        source_type="inventory",
+                        source_name="inventory_vars",
+                        source_path=None,
+                    )
                 )
-            )
+                # If value is a dict, recursively add nested keys
+                if isinstance(value, dict):
+                    flatten_vars(value, full_key)
+        
+        flatten_vars(known_variables)
 
     # Build a reverse map: for each task, what variables might it produce?
     # We can infer this from:
@@ -113,18 +122,36 @@ def build_producers_dictionary(
     if search_base:
         # Search for each variable in files
         for var_name in all_variables:
-            suggestions = find_variable_suggestions(var_name, search_base)
+            # Handle nested variables like "server_map.service"
+            # Search for both the full path and the base variable
+            base_var = var_name.split('.')[0] if '.' in var_name else var_name
+            
+            # Search for the base variable (e.g., "server_map")
+            suggestions = find_variable_suggestions(base_var, search_base)
             for category, files in suggestions.items():
                 for file_info in files:
-                    if var_name not in producers:
-                        producers[var_name] = []
-                    producers[var_name].append(
+                    # Add producer for the base variable
+                    if base_var not in producers:
+                        producers[base_var] = []
+                    producers[base_var].append(
                         VariableProducer(
                             source_type=category,
-                            source_name=var_name,
+                            source_name=base_var,
                             source_path=file_info.get("file"),
                         )
                     )
+                    # Also add producer for the nested variable if it exists
+                    # (e.g., if server_map is found, server_map.service is also available)
+                    if '.' in var_name:
+                        if var_name not in producers:
+                            producers[var_name] = []
+                        producers[var_name].append(
+                            VariableProducer(
+                                source_type=category,
+                                source_name=var_name,
+                                source_path=file_info.get("file"),
+                            )
+                        )
 
     # Add task-based producers (from task_to_variables map)
     for task_name, variables in task_to_variables.items():
