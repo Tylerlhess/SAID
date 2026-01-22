@@ -25,6 +25,7 @@ class TaskMetadata:
         triggers: List of task names that should be triggered after this task.
         watch_files: List of file paths/patterns this task watches for changes.
         depends_on: List of resources (from 'provides' of other tasks) this task depends on.
+        required_tasks: List of task names that must run before this task to produce required variables.
     """
 
     name: str
@@ -33,6 +34,7 @@ class TaskMetadata:
     triggers: List[str] = field(default_factory=list)
     watch_files: List[str] = field(default_factory=list)
     depends_on: List[str] = field(default_factory=list)
+    required_tasks: List[str] = field(default_factory=list)
 
     def __post_init__(self):
         """Validate task metadata after initialization."""
@@ -50,6 +52,8 @@ class TaskMetadata:
             raise SchemaError("Task 'watch_files' must be a list")
         if not isinstance(self.depends_on, list):
             raise SchemaError("Task 'depends_on' must be a list")
+        if not isinstance(self.required_tasks, list):
+            raise SchemaError("Task 'required_tasks' must be a list")
 
         # Ensure all list items are strings
         for field_name, field_value in [
@@ -58,6 +62,7 @@ class TaskMetadata:
             ("triggers", self.triggers),
             ("watch_files", self.watch_files),
             ("depends_on", self.depends_on),
+            ("required_tasks", self.required_tasks),
         ]:
             if not all(isinstance(item, str) for item in field_value):
                 raise SchemaError(f"All items in '{field_name}' must be strings")
@@ -114,6 +119,14 @@ class DependencyMap:
             if invalid_triggers:
                 raise SchemaError(
                     f"Task '{task.name}' triggers non-existent tasks: {invalid_triggers}"
+                )
+        
+        # Validate that all 'required_tasks' reference existing task names
+        for task in self.tasks:
+            invalid_required = set(task.required_tasks) - all_task_names
+            if invalid_required:
+                raise SchemaError(
+                    f"Task '{task.name}' requires non-existent tasks: {invalid_required}"
                 )
 
         # Validate that all 'depends_on' reference existing 'provides' values
@@ -203,6 +216,7 @@ def validate_task_metadata(data: dict) -> TaskMetadata:
             triggers=data.get("triggers", []),
             watch_files=data.get("watch_files", []),
             depends_on=data.get("depends_on", []),
+            required_tasks=data.get("required_tasks", []),
         )
     except SchemaError:
         raise

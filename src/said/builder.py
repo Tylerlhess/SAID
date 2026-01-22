@@ -201,6 +201,7 @@ def analyze_ansible_task(task: Dict, playbook_path: Path) -> Optional[Dict]:
         "triggers": [],
         "watch_files": sorted(list(watch_files)) if watch_files else [],
         "requires_vars": sorted(list(requires_vars)) if requires_vars else [],
+        "required_tasks": [],  # Will be populated during variable dependency analysis
     }
     
     # Track register and set_fact information for variable production analysis
@@ -683,6 +684,12 @@ def build_dependency_map_from_playbooks(
 ) -> DependencyMap:
     """Build a dependency map by analyzing multiple Ansible playbooks.
 
+    This function:
+    1. Analyzes playbooks to extract task metadata
+    2. Creates a dependency map
+    3. Applies variable-based dependencies (maps requires_vars to producing tasks)
+    4. Validates and returns the complete dependency map
+
     Args:
         playbook_paths: List of paths to Ansible playbook files.
         output_path: Optional path to write the generated dependency map YAML file.
@@ -690,7 +697,7 @@ def build_dependency_map_from_playbooks(
         known_variables: Optional dictionary of known variables to filter from requires_vars.
 
     Returns:
-        Validated DependencyMap instance.
+        Validated DependencyMap instance with variable-based dependencies applied.
 
     Raises:
         BuilderError: If analysis fails or dependency map is invalid.
@@ -754,6 +761,84 @@ def build_dependency_map_from_playbooks(
     try:
         # Try to create dependency map from tasks (may fail validation)
         dependency_map = validate_dependency_map({"tasks": unique_tasks})
+        
+        # Apply variable-based dependencies using two-pass analysis
+        # This maps requires_vars to the tasks that produce those variables
+        from said.variable_dependency_analyzer import map_variable_dependencies_to_tasks, build_producers_dictionary
+        from pathlib import Path
+        
+        # Determine search base for variable file discovery
+        search_base = None
+        if playbook_paths:
+            search_base = Path(playbook_paths[0]).parent
+        elif directory:
+            search_base = Path(directory)
+        
+        # Build producers dictionary (first pass)
+        producers = build_producers_dictionary(
+            dependency_map, search_base=search_base, known_variables=known_variables
+        )
+        
+        # Map variable dependencies to task dependencies (second pass)
+        variable_task_deps = map_variable_dependencies_to_tasks(dependency_map, producers)
+        
+        # Update each task's depends_on with variable-based dependencies
+        # Also populate required_tasks: tasks that produce the required variables
+        # Note: variable_task_deps contains resource names (variables), not task names
+        task_map = {task.name: task for task in dependency_map.tasks}
+        
+        # Build a reverse map: for each variable, which tasks produce it?
+        variable_to_producing_tasks: Dict[str, Set[str]] = {}
+        for var_name, var_producers in producers.items():
+            for producer in var_producers:
+                if producer.source_type == "task" and producer.source_name in task_map:
+                    producing_task = task_map[producer.source_name]
+                    # Only include if the variable is actually in the task's provides
+                    if var_name in producing_task.provides:
+                        if var_name not in variable_to_producing_tasks:
+                            variable_to_producing_tasks[var_name] = set()
+                        variable_to_producing_tasks[var_name].add(producer.source_name)
+        
+        for task_name, resource_deps in variable_task_deps.items():
+            if task_name in task_map:
+                task = task_map[task_name]
+                # Add variable-based dependencies (avoid duplicates)
+                # These are resource names (variables) that should be in depends_on
+                existing_deps = set(task.depends_on)
+                new_deps = resource_deps - existing_deps
+                if new_deps:
+                    task.depends_on.extend(new_deps)
+                
+                # Populate required_tasks: tasks that produce variables this task requires
+                required_task_set = set()
+                for required_var in task.requires_vars:
+                    if required_var in variable_to_producing_tasks:
+                        required_task_set.update(variable_to_producing_tasks[required_var])
+                
+                # Update required_tasks (avoid duplicates, maintain order)
+                existing_required = set(task.required_tasks)
+                new_required = required_task_set - existing_required
+                if new_required:
+                    task.required_tasks.extend(sorted(new_required))
+        
+        # Re-validate the dependency map after adding variable-based dependencies
+        # This ensures all depends_on references are valid
+        try:
+            # Re-validate by checking that all depends_on items exist in provides
+            all_provides = set()
+            for task in dependency_map.tasks:
+                all_provides.update(task.provides)
+            
+            for task in dependency_map.tasks:
+                invalid_deps = set(task.depends_on) - all_provides
+                if invalid_deps:
+                    # This shouldn't happen if our logic is correct, but check anyway
+                    if verbose:
+                        print(f"Warning: Task '{task.name}' has invalid dependencies after variable mapping: {invalid_deps}")
+        except Exception as e:
+            if verbose:
+                print(f"Warning: Error during dependency validation: {e}")
+        
     except SchemaError as e:
         # If validation fails, create a partial dependency map for error analysis
         # This allows us to analyze variables even when validation fails
@@ -806,6 +891,7 @@ def build_dependency_map_from_playbooks(
                     "triggers": task.triggers,
                     "watch_files": task.watch_files,
                     "requires_vars": task.requires_vars,
+                    "required_tasks": task.required_tasks,
                 }
                 for task in dependency_map.tasks
             ]

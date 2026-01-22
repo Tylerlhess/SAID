@@ -193,28 +193,31 @@ def map_variable_dependencies_to_tasks(
     task_name_map = {task.name: task for task in dependency_map.tasks}
 
     for task in dependency_map.tasks:
-        task_deps = set()
+        # Collect resources (variable names) that this task depends on
+        # depends_on should contain resource names (from provides), not task names
+        resource_deps = set()
 
         # For each required variable, find tasks that produce it
         for required_var in task.requires_vars:
             if required_var in producers:
                 for producer in producers[required_var]:
-                    # If producer is a task, add it as a dependency
+                    # If producer is a task, check if the variable is in that task's provides
                     if producer.source_type == "task":
                         if producer.source_name in task_name_map:
-                            task_deps.add(producer.source_name)
-                    # For variable files, we could create virtual tasks or
-                    # just note that the variable is available from files
-                    # For now, we'll focus on task-to-task dependencies
+                            producing_task = task_name_map[producer.source_name]
+                            # If the variable is in the producing task's provides, add it as a dependency
+                            if required_var in producing_task.provides:
+                                resource_deps.add(required_var)
+                    # For variable files (inventory, group_vars, etc.), we don't add them as dependencies
+                    # because they're not task resources - they're available at runtime
 
         # Also check existing depends_on (from provides/depends_on relationships)
+        # These are already resource names, so we keep them
         for resource in task.depends_on:
-            # Find tasks that provide this resource
-            for other_task in dependency_map.tasks:
-                if resource in other_task.provides:
-                    task_deps.add(other_task.name)
+            resource_deps.add(resource)
 
-        task_dependencies[task.name] = task_deps
+        # Return resource names (not task names) that this task depends on
+        task_dependencies[task.name] = resource_deps
 
     return task_dependencies
 
