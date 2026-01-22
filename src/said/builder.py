@@ -666,6 +666,37 @@ def analyze_ansible_playbook(
                 if all_tasks and tasks:
                     infer_dependencies_from_playbook(all_tasks, tasks)
                 
+                # Add the playbook file itself to watch_files for all tasks from this playbook
+                # This ensures changes to the playbook file trigger all its tasks
+                playbook_file_patterns = []
+                
+                # Add absolute path
+                playbook_file_patterns.append(str(playbook_path))
+                
+                # Add just filename (e.g., deploy_traefik_consul.yml)
+                playbook_file_patterns.append(playbook_path.name)
+                
+                # Add relative path if possible
+                try:
+                    playbook_file_relative = playbook_path.relative_to(Path.cwd())
+                    playbook_file_patterns.append(str(playbook_file_relative))
+                except ValueError:
+                    # Not relative to cwd, skip
+                    pass
+                
+                # Also add path relative to parent (common pattern)
+                if playbook_path.parent != playbook_path:
+                    playbook_file_patterns.append(str(playbook_path.relative_to(playbook_path.parent)))
+                
+                for task_meta in all_tasks:
+                    # Ensure watch_files exists and is a list
+                    if "watch_files" not in task_meta:
+                        task_meta["watch_files"] = []
+                    # Convert to set, add playbook patterns, convert back to sorted list
+                    watch_files_set = set(task_meta["watch_files"])
+                    watch_files_set.update(playbook_file_patterns)
+                    task_meta["watch_files"] = sorted(list(watch_files_set))
+                
                 return all_tasks
         else:
             plays = content
@@ -827,6 +858,37 @@ def analyze_ansible_playbook(
         all_play_tasks = pre_tasks + tasks + post_tasks
         if all_tasks and all_play_tasks:
             infer_dependencies_from_playbook(all_tasks, all_play_tasks)
+
+    # Add the playbook file itself to watch_files for all tasks from this playbook
+    # This ensures changes to the playbook file trigger all its tasks
+    playbook_file_patterns = []
+    
+    # Add absolute path
+    playbook_file_patterns.append(str(playbook_path))
+    
+    # Add just filename (e.g., deploy_traefik_consul.yml)
+    playbook_file_patterns.append(playbook_path.name)
+    
+    # Add relative path if possible
+    try:
+        playbook_file_relative = playbook_path.relative_to(Path.cwd())
+        playbook_file_patterns.append(str(playbook_file_relative))
+    except ValueError:
+        # Not relative to cwd, skip
+        pass
+    
+    # Also add path relative to parent (common pattern)
+    if playbook_path.parent != playbook_path:
+        playbook_file_patterns.append(str(playbook_path.relative_to(playbook_path.parent)))
+    
+    for task_meta in all_tasks:
+        # Ensure watch_files exists and is a list
+        if "watch_files" not in task_meta:
+            task_meta["watch_files"] = []
+        # Convert to set, add playbook patterns, convert back to sorted list
+        watch_files_set = set(task_meta["watch_files"])
+        watch_files_set.update(playbook_file_patterns)
+        task_meta["watch_files"] = sorted(list(watch_files_set))
 
     return all_tasks
 
