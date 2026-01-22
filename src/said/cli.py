@@ -7,6 +7,18 @@ from typing import Optional
 import click
 
 from said.coordinator import CoordinatorError, WorkflowCoordinator
+
+
+def echo_if_not_json(message: str, json_mode: bool = False, **kwargs):
+    """Echo a message only if JSON mode is not enabled.
+    
+    Args:
+        message: Message to output.
+        json_mode: If True, suppress output (JSON mode is active).
+        **kwargs: Additional arguments to pass to click.echo.
+    """
+    if not json_mode:
+        click.echo(message, **kwargs)
 from said.inventory_loader import (
     load_all_variables,
     load_group_vars,
@@ -133,6 +145,7 @@ def analyze(
                     },
                 }
                 click.echo(json.dumps(error_output, indent=2))
+                sys.exit(1)
             else:
                 from said.error_collector import DependencyErrorReport
 
@@ -155,7 +168,7 @@ def analyze(
                 click.echo(f"Total errors: {error_report.total_errors}")
                 for error in error_report.errors:
                     click.echo(f"  - {error.message}")
-            sys.exit(1)
+                sys.exit(1)
 
         if output_json:
             import json
@@ -181,26 +194,27 @@ def analyze(
                 }
             click.echo(json.dumps(output, indent=2))
         else:
-            # Human-readable output
-            if result["changed_files"]:
-                click.echo("\nChanged Files:")
-                for file_path in result["changed_files"]:
-                    click.echo(f"  - {file_path}")
+            # Human-readable output (suppressed if json_errors is enabled)
+            if not json_errors:
+                if result["changed_files"]:
+                    click.echo("\nChanged Files:")
+                    for file_path in result["changed_files"]:
+                        click.echo(f"  - {file_path}")
 
-            if result["matched_tasks"]:
-                click.echo(f"\nMatched Tasks ({len(result['matched_tasks'])}):")
-                for task_name in sorted(result["matched_tasks"]):
-                    click.echo(f"  - {task_name}")
+                if result["matched_tasks"]:
+                    click.echo(f"\nMatched Tasks ({len(result['matched_tasks'])}):")
+                    for task_name in sorted(result["matched_tasks"]):
+                        click.echo(f"  - {task_name}")
 
-            if result["execution_order"]:
-                click.echo(f"\nExecution Order ({len(result['execution_order'])}):")
-                for i, task_name in enumerate(result["execution_order"], start=1):
-                    click.echo(f"  {i}. {task_name}")
+                if result["execution_order"]:
+                    click.echo(f"\nExecution Order ({len(result['execution_order'])}):")
+                    for i, task_name in enumerate(result["execution_order"], start=1):
+                        click.echo(f"  {i}. {task_name}")
 
-                click.echo("\nGenerated Ansible Command:")
-                click.echo(f"  {result['command_string']}")
-            else:
-                click.echo("\nNo tasks to execute.")
+                    click.echo("\nGenerated Ansible Command:")
+                    click.echo(f"  {result['command_string']}")
+                else:
+                    click.echo("\nNo tasks to execute.")
 
     except CoordinatorError as e:
         if json_errors or output_json:
@@ -398,57 +412,63 @@ def execute(
                     error_summary=result["validation_errors"]["error_summary"],
                 )
 
-                click.echo("\n✗ Validation errors detected:")
-                click.echo(f"Total errors: {error_report.total_errors}")
-                for error in error_report.errors:
-                    click.echo(f"  - {error.message}")
+                if not json_errors:
+                    click.echo("\n✗ Validation errors detected:")
+                    click.echo(f"Total errors: {error_report.total_errors}")
+                    for error in error_report.errors:
+                        click.echo(f"  - {error.message}")
             sys.exit(1)
 
         if not result["execution_order"]:
-            click.echo("No tasks to execute.")
+            if not json_errors:
+                click.echo("No tasks to execute.")
             return
 
-        # Display execution plan using orchestrator's formatter
-        orchestrator = coordinator.orchestrator
-        if orchestrator:
-            plan = orchestrator.format_execution_plan(
-                task_names=result["execution_order"],
-                changed_files=result["changed_files"],
-                matched_tasks=result["matched_tasks"],
-                command_string=result["command_string"],
-            )
-            click.echo("\n" + plan)
-        else:
-            # Fallback to basic format
-            click.echo("\n" + "=" * 60)
-            click.echo("SAID Execution Plan")
-            click.echo("=" * 60)
+        # Display execution plan using orchestrator's formatter (suppressed if json_errors)
+        if not json_errors:
+            orchestrator = coordinator.orchestrator
+            if orchestrator:
+                plan = orchestrator.format_execution_plan(
+                    task_names=result["execution_order"],
+                    changed_files=result["changed_files"],
+                    matched_tasks=result["matched_tasks"],
+                    command_string=result["command_string"],
+                )
+                click.echo("\n" + plan)
+            else:
+                # Fallback to basic format
+                click.echo("\n" + "=" * 60)
+                click.echo("SAID Execution Plan")
+                click.echo("=" * 60)
 
-            if result["changed_files"]:
-                click.echo("\nChanged Files:")
-                for file_path in result["changed_files"]:
-                    click.echo(f"  - {file_path}")
+                if result["changed_files"]:
+                    click.echo("\nChanged Files:")
+                    for file_path in result["changed_files"]:
+                        click.echo(f"  - {file_path}")
 
-            click.echo(f"\nTasks to Execute ({len(result['execution_order'])}):")
-            for i, task_name in enumerate(result["execution_order"], start=1):
-                click.echo(f"  {i}. {task_name}")
+                click.echo(f"\nTasks to Execute ({len(result['execution_order'])}):")
+                for i, task_name in enumerate(result["execution_order"], start=1):
+                    click.echo(f"  {i}. {task_name}")
 
-            click.echo("\nGenerated Ansible Command:")
-            click.echo(f"  {result['command_string']}")
+                click.echo("\nGenerated Ansible Command:")
+                click.echo(f"  {result['command_string']}")
 
         if dry_run:
-            click.echo("\n[DRY RUN MODE - Command will not be executed]")
+            if not json_errors:
+                click.echo("\n[DRY RUN MODE - Command will not be executed]")
             return
 
-        # Confirm execution
-        if not click.confirm("\nExecute this command?"):
-            click.echo("Execution cancelled.")
-            return
+        # Confirm execution (skip if json_errors - assume yes for automation)
+        if not json_errors:
+            if not click.confirm("\nExecute this command?"):
+                click.echo("Execution cancelled.")
+                return
 
         # Execute command
         import subprocess
 
-        click.echo("\nExecuting Ansible command...")
+        if not json_errors:
+            click.echo("\nExecuting Ansible command...")
         try:
             exit_code = subprocess.run(
                 result["command"],
@@ -456,15 +476,18 @@ def execute(
             ).returncode
 
             if exit_code == 0:
-                click.echo("\n✓ Execution successful!")
+                if not json_errors:
+                    click.echo("\n✓ Execution successful!")
 
                 # Update state store
                 if not no_state_update:
                     current_commit = coordinator.git_detector.get_current_commit_sha()
                     coordinator.update_successful_commit(current_commit, environment)
-                    click.echo(f"✓ State updated for environment '{environment}'")
+                    if not json_errors:
+                        click.echo(f"✓ State updated for environment '{environment}'")
             else:
-                click.echo(f"\n✗ Execution failed with exit code {exit_code}", err=True)
+                if not json_errors:
+                    click.echo(f"\n✗ Execution failed with exit code {exit_code}", err=True)
                 sys.exit(exit_code)
 
         except KeyboardInterrupt:
@@ -610,10 +633,29 @@ def validate(
         else:
             dep_map = discover_dependency_map()
             if dep_map is None:
-                click.echo("Error: Could not find dependency_map.yml", err=True)
+                if output_json:
+                    import json
+                    from said.error_collector import DependencyError, DependencyErrorReport
+                    
+                    error_report = DependencyErrorReport(
+                        errors=[
+                            DependencyError(
+                                error_type="file_not_found",
+                                task_name="validation",
+                                message="Could not find dependency_map.yml",
+                                details={},
+                            )
+                        ],
+                        total_errors=1,
+                        error_summary={"file_not_found": 1},
+                    )
+                    click.echo(error_report.to_json())
+                else:
+                    click.echo("Error: Could not find dependency_map.yml", err=True)
                 sys.exit(1)
 
-        click.echo("✓ Dependency map structure is valid")
+        if not output_json:
+            click.echo("✓ Dependency map structure is valid")
 
         # Load variables
         vars_dict = {}
@@ -625,14 +667,33 @@ def validate(
                     if isinstance(inv_content, dict) and "all" in inv_content:
                         vars_dict.update(inv_content["all"].get("vars", {}))
             except Exception as e:
-                click.echo(f"Warning: Could not load variables from inventory: {e}", err=True)
+                if not output_json:
+                    click.echo(f"Warning: Could not load variables from inventory: {e}", err=True)
 
         if variables:
             try:
                 with open(variables, "r", encoding="utf-8") as f:
                     vars_dict.update(yaml.safe_load(f) or {})
             except Exception as e:
-                click.echo(f"Error loading variables file: {e}", err=True)
+                if output_json:
+                    import json
+                    from said.error_collector import DependencyError, DependencyErrorReport
+                    
+                    error_report = DependencyErrorReport(
+                        errors=[
+                            DependencyError(
+                                error_type="file_error",
+                                task_name="validation",
+                                message=f"Error loading variables file: {e}",
+                                details={"error_class": type(e).__name__},
+                            )
+                        ],
+                        total_errors=1,
+                        error_summary={"file_error": 1},
+                    )
+                    click.echo(error_report.to_json())
+                else:
+                    click.echo(f"Error loading variables file: {e}", err=True)
                 sys.exit(1)
 
         # Comprehensive validation with error collection
@@ -661,6 +722,7 @@ def validate(
         if error_report.has_errors():
             if output_json:
                 click.echo(error_report.to_json())
+                sys.exit(1)
             else:
                 click.echo("\n✗ Dependency validation failed:")
                 click.echo(f"Total errors: {error_report.total_errors}")
@@ -695,6 +757,32 @@ def validate(
                                                         click.echo(f"          - {file_path}")
                                                 if len(files) > 3:
                                                     click.echo(f"          ... and {len(files) - 3} more")
+                                elif key == "variable_producers":
+                                    # Format variable producers (two-pass analysis results)
+                                    click.echo(f"    Variable producers (tasks/files that could provide these variables):")
+                                    for var_name, producers in value.items():
+                                        click.echo(f"      {var_name}:")
+                                        if producers:
+                                            for producer in producers[:5]:  # Limit to 5 producers
+                                                source_type = producer.get("source_type", "unknown")
+                                                source_name = producer.get("source_name", "unknown")
+                                                source_path = producer.get("source_path")
+                                                if source_path:
+                                                    click.echo(f"        - {source_type}: {source_path}")
+                                                else:
+                                                    click.echo(f"        - {source_type}: {source_name}")
+                                            if len(producers) > 5:
+                                                click.echo(f"        ... and {len(producers) - 5} more")
+                                        else:
+                                            click.echo(f"        (no producers found)")
+                                elif key == "suggested_task_dependencies":
+                                    # Show suggested task dependencies
+                                    if value:
+                                        click.echo(f"    Suggested task dependencies (based on variable producers):")
+                                        for dep_task in value[:5]:  # Limit to 5
+                                            click.echo(f"      - {dep_task}")
+                                        if len(value) > 5:
+                                            click.echo(f"      ... and {len(value) - 5} more")
                                 elif isinstance(value, list) and len(value) > 5:
                                     click.echo(f"    {key}: {len(value)} items")
                                 elif isinstance(value, dict):
@@ -841,22 +929,22 @@ def build(
         # Load variables from inventory, group_vars, and host_vars
         known_variables = {}
         if hosts or group_vars_paths or host_vars_paths or not no_auto_discover_vars:
-            if verbose:
+            if verbose and not json_errors:
                 click.echo("Loading variables from inventory and vars files...")
             
             # Determine inventory directory for auto-discovery
             inventory_dir = None
             if hosts:
                 inventory_dir = Path(hosts).parent
-                if verbose:
+                if verbose and not json_errors:
                     click.echo(f"  Inventory: {hosts}")
 
             # Load from explicit paths
             for gv_path in group_vars_paths:
-                if verbose:
+                if verbose and not json_errors:
                     click.echo(f"  Group vars: {gv_path}")
             for hv_path in host_vars_paths:
-                if verbose:
+                if verbose and not json_errors:
                     click.echo(f"  Host vars: {hv_path}")
 
             try:
@@ -878,38 +966,60 @@ def build(
                     except Exception:
                         pass
                 
-                if verbose:
+                if verbose and not json_errors:
                     click.echo(f"  Loaded {len(known_variables)} known variables")
             except Exception as e:
-                if verbose:
+                if verbose and not json_errors:
                     click.echo(f"  Warning: Could not load some variables: {e}", err=True)
 
         # Check if output file exists
         if output.exists() and not overwrite:
-            if not click.confirm(
-                f"File {output} already exists. Overwrite?",
-                default=False,
-            ):
-                click.echo("Cancelled.")
-                return
+            if json_errors:
+                # In JSON mode, don't prompt - just error
+                import json
+                from said.error_collector import DependencyError, DependencyErrorReport
+                
+                error_report = DependencyErrorReport(
+                    errors=[
+                        DependencyError(
+                            error_type="file_exists",
+                            task_name="build",
+                            message=f"File {output} already exists. Use --overwrite to overwrite.",
+                            details={"file": str(output)},
+                        )
+                    ],
+                    total_errors=1,
+                    error_summary={"file_exists": 1},
+                )
+                click.echo(error_report.to_json())
+                sys.exit(1)
+            else:
+                if not click.confirm(
+                    f"File {output} already exists. Overwrite?",
+                    default=False,
+                ):
+                    click.echo("Cancelled.")
+                    return
 
         # Build from directory or playbooks
         if directory:
-            if playbook_paths:
+            if playbook_paths and not json_errors:
                 click.echo(
                     "Warning: Both --directory and --playbook specified. Using directory.",
                     err=True,
                 )
-            click.echo(f"Analyzing playbooks in {directory}...")
+            if not json_errors:
+                click.echo(f"Analyzing playbooks in {directory}...")
             dep_map = build_dependency_map_from_directory(
-                directory, output, verbose=verbose, known_variables=known_variables
+                directory, output, verbose=verbose and not json_errors, known_variables=known_variables
             )
         elif playbook_paths:
-            click.echo(f"Analyzing {len(playbook_paths)} playbook(s)...")
-            for i, pb in enumerate(playbook_paths, 1):
-                click.echo(f"  {i}. {pb}")
+            if not json_errors:
+                click.echo(f"Analyzing {len(playbook_paths)} playbook(s)...")
+                for i, pb in enumerate(playbook_paths, 1):
+                    click.echo(f"  {i}. {pb}")
             dep_map = build_dependency_map_from_playbooks(
-                playbook_paths, output, verbose=verbose, known_variables=known_variables
+                playbook_paths, output, verbose=verbose and not json_errors, known_variables=known_variables
             )
         else:
             if json_errors:
@@ -936,14 +1046,15 @@ def build(
                 )
             sys.exit(1)
 
-        click.echo(f"\n✓ Generated dependency map with {len(dep_map.tasks)} tasks")
-        click.echo(f"✓ Written to {output}")
+        if not json_errors:
+            click.echo(f"\n✓ Generated dependency map with {len(dep_map.tasks)} tasks")
+            click.echo(f"✓ Written to {output}")
 
-        click.echo("\n📝 Next steps:")
-        click.echo("  1. Review the generated dependency_map.yml")
-        click.echo("  2. Add/edit watch_files, depends_on, triggers as needed")
-        click.echo("  3. Verify required variables are correct")
-        click.echo("  4. Run 'said validate' to check the dependency map")
+            click.echo("\n📝 Next steps:")
+            click.echo("  1. Review the generated dependency_map.yml")
+            click.echo("  2. Add/edit watch_files, depends_on, triggers as needed")
+            click.echo("  3. Verify required variables are correct")
+            click.echo("  4. Run 'said validate' to check the dependency map")
 
     except BuilderError as e:
         if json_errors:

@@ -73,50 +73,98 @@ class DependencyErrorCollector:
     def collect_missing_variables(
         self,
         validation_results: Dict[str, Set[str]],
+        dependency_map: Optional[DependencyMap] = None,
         search_base: Optional[Path] = None,
         search_for_suggestions: bool = True,
+        known_variables: Optional[Dict] = None,
     ) -> None:
         """Collect missing variable errors from validation results.
 
+        Uses a two-pass process:
+        1. Build producers dictionary (variables -> what produces them)
+        2. Map variable dependencies to task dependencies
+
         Args:
             validation_results: Dictionary mapping task names to sets of missing variables.
+            dependency_map: Optional dependency map for comprehensive analysis.
             search_base: Base directory to search for variable definitions.
             search_for_suggestions: If True, search for where variables might be defined.
+            known_variables: Optional dictionary of known variables.
         """
-        from said.variable_searcher import find_all_variable_suggestions
+        from said.variable_dependency_analyzer import analyze_variable_dependencies_comprehensive
 
-        # Collect all unique missing variables
-        all_missing_vars = set()
-        for missing_vars in validation_results.values():
-            all_missing_vars.update(missing_vars)
+        # If we have a dependency map, do comprehensive two-pass analysis
+        if dependency_map and search_for_suggestions:
+            analysis = analyze_variable_dependencies_comprehensive(
+                dependency_map, search_base=search_base, known_variables=known_variables
+            )
 
-        # Search for suggestions if requested
-        suggestions = {}
-        if search_for_suggestions and all_missing_vars:
-            suggestions = find_all_variable_suggestions(all_missing_vars, search_base)
+            # Use the analysis to build better error messages
+            for task_name, missing_vars in validation_results.items():
+                if missing_vars:
+                    error_details = {
+                        "missing_variables": sorted(list(missing_vars)),
+                    }
 
-        for task_name, missing_vars in validation_results.items():
-            if missing_vars:
-                # Build suggestions for this task's missing variables
-                task_suggestions = {}
-                for var_name in missing_vars:
-                    if var_name in suggestions:
-                        task_suggestions[var_name] = suggestions[var_name]
+                    # For each missing variable, show what could produce it
+                    variable_producers = {}
+                    for var_name in missing_vars:
+                        if var_name in analysis["producers"]:
+                            variable_producers[var_name] = analysis["producers"][var_name]
+                        else:
+                            # Variable has no known producers
+                            variable_producers[var_name] = []
 
-                error_details = {
-                    "missing_variables": sorted(list(missing_vars)),
-                }
-                if task_suggestions:
-                    error_details["suggestions"] = task_suggestions
+                    error_details["variable_producers"] = variable_producers
 
-                self.errors.append(
-                    DependencyError(
-                        error_type="missing_variable",
-                        task_name=task_name,
-                        message=f"Task '{task_name}' requires variables that are not defined: {', '.join(sorted(missing_vars))}",
-                        details=error_details,
+                    # Also show task dependencies that could be added
+                    if task_name in analysis["task_dependencies"]:
+                        error_details["suggested_task_dependencies"] = analysis["task_dependencies"][task_name]
+
+                    self.errors.append(
+                        DependencyError(
+                            error_type="missing_variable",
+                            task_name=task_name,
+                            message=f"Task '{task_name}' requires variables that are not defined: {', '.join(sorted(missing_vars))}",
+                            details=error_details,
+                        )
                     )
-                )
+        else:
+            # Fallback to simple suggestions
+            from said.variable_searcher import find_all_variable_suggestions
+
+            # Collect all unique missing variables
+            all_missing_vars = set()
+            for missing_vars in validation_results.values():
+                all_missing_vars.update(missing_vars)
+
+            # Search for suggestions if requested
+            suggestions = {}
+            if search_for_suggestions and all_missing_vars:
+                suggestions = find_all_variable_suggestions(all_missing_vars, search_base)
+
+            for task_name, missing_vars in validation_results.items():
+                if missing_vars:
+                    # Build suggestions for this task's missing variables
+                    task_suggestions = {}
+                    for var_name in missing_vars:
+                        if var_name in suggestions:
+                            task_suggestions[var_name] = suggestions[var_name]
+
+                    error_details = {
+                        "missing_variables": sorted(list(missing_vars)),
+                    }
+                    if task_suggestions:
+                        error_details["suggestions"] = task_suggestions
+
+                    self.errors.append(
+                        DependencyError(
+                            error_type="missing_variable",
+                            task_name=task_name,
+                            message=f"Task '{task_name}' requires variables that are not defined: {', '.join(sorted(missing_vars))}",
+                            details=error_details,
+                        )
+                    )
 
     def collect_missing_dependencies(
         self, dependency_map: DependencyMap
@@ -333,8 +381,10 @@ def validate_dependency_map_comprehensive(
             )
         collector.collect_missing_variables(
             validation_results,
+            dependency_map=dependency_map,
             search_base=search_base,
             search_for_suggestions=search_for_suggestions,
+            known_variables=variables,
         )
 
     return collector.generate_report()

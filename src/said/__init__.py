@@ -74,6 +74,12 @@ from said.variable_searcher import (
     search_variable_in_text_file,
     search_variable_in_yaml_file,
 )
+from said.variable_dependency_analyzer import (
+    VariableProducer,
+    analyze_variable_dependencies_comprehensive,
+    build_producers_dictionary,
+    map_variable_dependencies_to_tasks,
+)
 
 __all__ = [
     "__version__",
@@ -148,4 +154,9 @@ __all__ = [
     "find_all_variable_suggestions",
     "search_variable_in_yaml_file",
     "search_variable_in_text_file",
+    # Variable Dependency Analyzer
+    "VariableProducer",
+    "build_producers_dictionary",
+    "map_variable_dependencies_to_tasks",
+    "analyze_variable_dependencies_comprehensive",
 ]
