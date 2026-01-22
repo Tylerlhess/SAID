@@ -990,7 +990,8 @@ def validate(
     help="Show verbose output about discovered tasks.",
 )
 @click.option(
-    "--hosts",
+    "--inventory",
+    "-i",
     type=click.Path(exists=True, path_type=Path),
     help="Path to Ansible inventory file (hosts.ini or hosts.yml).",
 )
@@ -1022,7 +1023,7 @@ def build(
     output: Path,
     overwrite: bool,
     verbose: bool,
-    hosts: Optional[Path],
+    inventory: Optional[Path],
     groupvars: tuple,
     hostvars: tuple,
     no_auto_discover_vars: bool,
@@ -1043,7 +1044,7 @@ def build(
     Example:
         said build --directory ./playbooks --output dependency_map.yml
         said build --playbook site.yml --playbook roles/web/tasks/main.yml
-        said build -p roles/consul_keepalived/tasks/main.yml --hosts inventories/dev/hosts.ini --groupvars inventories/dev/group_vars/dev2.yml
+        said build -p roles/consul_keepalived/tasks/main.yml --inventory inventories/dev/hosts.ini --groupvars inventories/dev/group_vars/dev2.yml
     """
     try:
         from said.builder import (
@@ -1059,16 +1060,16 @@ def build(
 
         # Load variables from inventory, group_vars, and host_vars
         known_variables = {}
-        if hosts or group_vars_paths or host_vars_paths or not no_auto_discover_vars:
+        if inventory or group_vars_paths or host_vars_paths or not no_auto_discover_vars:
             if verbose and not json_errors:
                 click.echo("Loading variables from inventory and vars files...")
             
             # Determine inventory directory for auto-discovery
             inventory_dir = None
-            if hosts:
-                inventory_dir = Path(hosts).parent
+            if inventory:
+                inventory_dir = Path(inventory).parent
                 if verbose and not json_errors:
-                    click.echo(f"  Inventory: {hosts}")
+                    click.echo(f"  Inventory: {inventory}")
 
             # Load from explicit paths
             for gv_path in group_vars_paths:
@@ -1080,7 +1081,7 @@ def build(
 
             try:
                 known_variables = load_all_variables(
-                    inventory_path=hosts,
+                    inventory_path=inventory,
                     group_vars_path=group_vars_paths[0] if group_vars_paths else None,
                     host_vars_path=host_vars_paths[0] if host_vars_paths else None,
                     auto_discover=not no_auto_discover_vars,
