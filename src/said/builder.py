@@ -809,10 +809,13 @@ def build_dependency_map_from_playbooks(
                     task.depends_on.extend(new_deps)
                 
                 # Populate required_tasks: tasks that produce variables this task requires
+                # Exclude the current task from required_tasks (tasks shouldn't require themselves)
                 required_task_set = set()
                 for required_var in task.requires_vars:
                     if required_var in variable_to_producing_tasks:
-                        required_task_set.update(variable_to_producing_tasks[required_var])
+                        # Filter out the current task - tasks shouldn't require themselves
+                        producing_tasks = variable_to_producing_tasks[required_var] - {task_name}
+                        required_task_set.update(producing_tasks)
                 
                 # Update required_tasks (avoid duplicates, maintain order)
                 existing_required = set(task.required_tasks)
