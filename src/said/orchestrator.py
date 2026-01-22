@@ -62,10 +62,25 @@ class AnsibleOrchestrator:
         # Add playbook path
         cmd.append(self.playbook_path)
 
+        # Extract task name parts for tags
+        # Task names are in format like "role/traefik/tasks/main:Task Name"
+        # We need to extract just the task name part (after the colon) for Ansible tags
+        # If there's no colon, use the full name
+        ansible_tags = []
+        for task_name in task_names:
+            # Extract the task name part (after the last colon)
+            if ":" in task_name:
+                # Get the part after the last colon
+                tag_name = task_name.split(":", 1)[-1]
+            else:
+                # No colon, use the full name
+                tag_name = task_name
+            ansible_tags.append(tag_name)
+        
         # Add tags
         # In Ansible, tags are specified as --tags "tag1,tag2,tag3"
-        # We'll use the task names as tags
-        tags_str = ",".join(task_names)
+        # Use the extracted task names as tags
+        tags_str = ",".join(ansible_tags)
         cmd.extend(["--tags", tags_str])
 
         # Add dry-run flag if requested
