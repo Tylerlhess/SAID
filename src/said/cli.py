@@ -1060,19 +1060,39 @@ def build(
         if json_errors:
             import json
             from said.error_collector import DependencyError, DependencyErrorReport
+            from said.error_parser import structure_dependency_error
             
-            error_report = DependencyErrorReport(
-                errors=[
-                    DependencyError(
-                        error_type="builder_error",
-                        task_name="build",
-                        message=str(e),
-                        details={"error_class": type(e).__name__},
-                    )
-                ],
-                total_errors=1,
-                error_summary={"builder_error": 1},
-            )
+            # Try to parse and structure the error
+            structured = structure_dependency_error(str(e), type(e).__name__)
+            
+            # If it's a dependency error, use the structured format
+            if structured["error_type"] == "invalid_dependency":
+                error_report = DependencyErrorReport(
+                    errors=[
+                        DependencyError(
+                            error_type=structured["error_type"],
+                            task_name=structured["task_name"],
+                            message=structured["message"],
+                            details=structured["details"],
+                        )
+                    ],
+                    total_errors=1,
+                    error_summary={"invalid_dependency": 1},
+                )
+            else:
+                # Fallback to basic builder error
+                error_report = DependencyErrorReport(
+                    errors=[
+                        DependencyError(
+                            error_type="builder_error",
+                            task_name="build",
+                            message=str(e),
+                            details={"error_class": type(e).__name__},
+                        )
+                    ],
+                    total_errors=1,
+                    error_summary={"builder_error": 1},
+                )
             click.echo(error_report.to_json())
         else:
             click.echo(f"Error: {e}", err=True)

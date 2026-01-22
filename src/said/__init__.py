@@ -80,6 +80,7 @@ from said.variable_dependency_analyzer import (
     build_producers_dictionary,
     map_variable_dependencies_to_tasks,
 )
+from said.error_parser import parse_dependency_error, structure_dependency_error
 
 __all__ = [
     "__version__",
@@ -159,4 +160,7 @@ __all__ = [
     "build_producers_dictionary",
     "map_variable_dependencies_to_tasks",
     "analyze_variable_dependencies_comprehensive",
+    # Error Parser
+    "parse_dependency_error",
+    "structure_dependency_error",
 ]

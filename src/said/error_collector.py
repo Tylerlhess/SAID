@@ -6,7 +6,7 @@ and format them as JSON for programmatic consumption.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 
 from said.schema import DependencyMap
 
@@ -17,7 +17,7 @@ class DependencyError:
 
     error_type: str  # e.g., "missing_variable", "missing_dependency", "circular_dependency"
     task_name: str
-    message: str
+    message: Union[str, Dict]  # Can be a string or structured dict
     details: Dict = field(default_factory=dict)
 
 
@@ -35,18 +35,26 @@ class DependencyErrorReport:
         Returns:
             Dictionary representation of the error report.
         """
+        errors_list = []
+        for err in self.errors:
+            error_dict = {
+                "error_type": err.error_type,
+                "task_name": err.task_name,
+                "details": err.details,
+            }
+            # If message is already a dict (structured), use it directly
+            # Otherwise, use it as a string
+            if isinstance(err.message, dict):
+                error_dict["message"] = err.message
+            else:
+                error_dict["message"] = err.message
+            
+            errors_list.append(error_dict)
+        
         return {
             "total_errors": self.total_errors,
             "error_summary": self.error_summary,
-            "errors": [
-                {
-                    "error_type": err.error_type,
-                    "task_name": err.task_name,
-                    "message": err.message,
-                    "details": err.details,
-                }
-                for err in self.errors
-            ],
+            "errors": errors_list,
         }
 
     def to_json(self, indent: int = 2) -> str:
