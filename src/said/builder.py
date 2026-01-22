@@ -369,12 +369,74 @@ def analyze_role(role_path: Path, base_path: Path, visited: Set[Path]) -> List[D
         try:
             # Build path-based prefix for role handlers
             handler_prefix = build_task_prefix(handlers_path)
-            tasks = analyze_ansible_playbook(handlers_path, visited, source_prefix=handler_prefix)
-            # Mark handlers appropriately
-            for task in tasks:
-                if "triggers" not in task or not task["triggers"]:
-                    task["triggers"] = [f"notify_{task['name']}"]
-            all_tasks.extend(tasks)
+            
+            # Load handler file content to process listen: tasks
+            import yaml
+            with open(handlers_path, "r", encoding="utf-8") as f:
+                handler_content = yaml.safe_load(f)
+            
+            if handler_content:
+                # Group tasks by handler name (tasks with listen: belong to the handler)
+                handler_groups = {}  # handler_name -> list of tasks
+                standalone_tasks = []
+                
+                handler_list = handler_content if isinstance(handler_content, list) else [handler_content]
+                for task_dict in handler_list:
+                    if not isinstance(task_dict, dict):
+                        continue
+                    
+                    # Check if task has listen: (belongs to a handler)
+                    if "listen" in task_dict:
+                        listen_name = task_dict["listen"]
+                        if listen_name not in handler_groups:
+                            handler_groups[listen_name] = []
+                        handler_groups[listen_name].append(task_dict)
+                    else:
+                        # Standalone handler (has name but no listen)
+                        if "name" in task_dict:
+                            handler_name = task_dict["name"]
+                            if handler_name not in handler_groups:
+                                handler_groups[handler_name] = []
+                            handler_groups[handler_name].append(task_dict)
+                        else:
+                            standalone_tasks.append(task_dict)
+                
+                # Process each handler group
+                for handler_name, handler_tasks in handler_groups.items():
+                    # Use the first task as the main handler (usually the one with name:)
+                    main_task = None
+                    for task_dict in handler_tasks:
+                        if "name" in task_dict and task_dict["name"] == handler_name:
+                            main_task = task_dict
+                            break
+                    
+                    # If no task has the exact name, use the first one
+                    if not main_task:
+                        main_task = handler_tasks[0]
+                    
+                    # Analyze the main handler task
+                    task_meta = analyze_ansible_task(main_task, handlers_path)
+                    if task_meta:
+                        # Set the full prefixed name
+                        if not task_meta["name"].startswith(f"{handler_prefix}:"):
+                            task_meta["name"] = f"{handler_prefix}:{task_meta['name']}"
+                        
+                        # Don't set triggers automatically - they will be populated by tasks that notify this handler
+                        # The handler name (without prefix) is what tasks use in notify: statements
+                        # Triggers will be set by infer_dependencies_from_playbook when it processes notify: statements
+                        task_meta["triggers"] = []
+                        
+                        all_tasks.append(task_meta)
+                
+                # Process standalone tasks (shouldn't happen in handlers, but handle it)
+                for task_dict in standalone_tasks:
+                    task_meta = analyze_ansible_task(task_dict, handlers_path)
+                    if task_meta:
+                        if not task_meta["name"].startswith(f"{handler_prefix}:"):
+                            task_meta["name"] = f"{handler_prefix}:{task_meta['name']}"
+                        # Don't set triggers automatically - they will be populated by tasks that notify this handler
+                        task_meta["triggers"] = []
+                        all_tasks.append(task_meta)
         except BuilderError:
             pass
 
@@ -454,17 +516,26 @@ def infer_dependencies_from_playbook(
             notify_targets = task_dict["notify"]
             if isinstance(notify_targets, list):
                 for handler_name in notify_targets:
-                    # Find handler task and add trigger relationship
+                    # Find handler task by matching handler name (notify uses simple name, task name has prefix)
                     for other_task in all_tasks:
-                        if other_task["name"] == handler_name:
+                        # Match by full name or by handler name (part after colon)
+                        task_full_name = other_task["name"]
+                        task_handler_name = task_full_name.split(":", 1)[-1] if ":" in task_full_name else task_full_name
+                        
+                        if task_full_name == handler_name or task_handler_name == handler_name:
                             if "triggers" not in other_task:
                                 other_task["triggers"] = []
                             if task_name not in other_task["triggers"]:
                                 other_task["triggers"].append(task_name)
             elif isinstance(notify_targets, str):
                 # Single handler
+                handler_name = notify_targets
                 for other_task in all_tasks:
-                    if other_task["name"] == notify_targets:
+                    # Match by full name or by handler name (part after colon)
+                    task_full_name = other_task["name"]
+                    task_handler_name = task_full_name.split(":", 1)[-1] if ":" in task_full_name else task_full_name
+                    
+                    if task_full_name == handler_name or task_handler_name == handler_name:
                         if "triggers" not in other_task:
                             other_task["triggers"] = []
                         if task_name not in other_task["triggers"]:
