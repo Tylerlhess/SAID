@@ -765,7 +765,6 @@ def build_dependency_map_from_playbooks(
         # Apply variable-based dependencies using two-pass analysis
         # This maps requires_vars to the tasks that produce those variables
         from said.variable_dependency_analyzer import map_variable_dependencies_to_tasks, build_producers_dictionary
-        from pathlib import Path
         
         # Determine search base for variable file discovery
         search_base = None
