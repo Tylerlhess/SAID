@@ -594,6 +594,33 @@ def analyze_ansible_playbook(
         # Extract tasks from play
         tasks = play.get("tasks", [])
         handlers = play.get("handlers", [])
+        
+        # Extract roles from play (roles: key at play level)
+        play_roles = play.get("roles", [])
+        
+        # Process play-level roles
+        for role_item in play_roles:
+            role_name = None
+            if isinstance(role_item, str):
+                # Simple role name: roles: [role1, role2]
+                role_name = role_item
+            elif isinstance(role_item, dict):
+                # Role with parameters: roles: [{ role: role1, vars: {...} }]
+                # Can be: { role: "name" } or { name: "name" } or just the role name as key
+                role_name = role_item.get("role") or role_item.get("name")
+                # If still None, check if it's a dict with a single key (role name)
+                if not role_name and len(role_item) == 1:
+                    role_name = list(role_item.keys())[0]
+            
+            if role_name:
+                role_path = find_role_path(role_name, playbook_path)
+                if role_path:
+                    try:
+                        role_tasks = analyze_role(role_path, playbook_path, visited)
+                        all_tasks.extend(role_tasks)
+                    except BuilderError:
+                        # If role expansion fails, skip it (role might not exist)
+                        pass
 
         # Analyze handlers
         for handler in handlers:
