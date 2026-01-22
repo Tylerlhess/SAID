@@ -440,6 +440,21 @@ def analyze_role(role_path: Path, base_path: Path, visited: Set[Path]) -> List[D
         except BuilderError:
             pass
 
+    # Add role watch_files patterns to all tasks from this role
+    # This ensures changes to role files trigger these tasks
+    role_watch_patterns = [
+        f"roles/{role_name}/**/*",
+        f"roles/{role_name}/tasks/**/*",
+    ]
+    for task_meta in all_tasks:
+        # Ensure watch_files exists and is a list
+        if "watch_files" not in task_meta:
+            task_meta["watch_files"] = []
+        # Convert to set, add patterns, convert back to sorted list
+        watch_files_set = set(task_meta["watch_files"])
+        watch_files_set.update(role_watch_patterns)
+        task_meta["watch_files"] = sorted(list(watch_files_set))
+
     return all_tasks
 
 
@@ -688,6 +703,7 @@ def analyze_ansible_playbook(
                 if role_path:
                     try:
                         role_tasks = analyze_role(role_path, playbook_path, visited)
+                        # analyze_role already adds role watch_files patterns to all tasks
                         all_tasks.extend(role_tasks)
                     except BuilderError:
                         # If role expansion fails, skip it (role might not exist)
@@ -758,6 +774,7 @@ def analyze_ansible_playbook(
                         if role_path:
                             try:
                                 role_tasks = analyze_role(role_path, playbook_path, visited)
+                                # analyze_role already adds role watch_files patterns to all tasks
                                 all_tasks.extend(role_tasks)
                             except BuilderError:
                                 # If role expansion fails, still analyze the role task itself
