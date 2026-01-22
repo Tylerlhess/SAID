@@ -37,6 +37,47 @@ def cli():
     pass
 
 
+def _is_task_file(file_path: Path) -> bool:
+    """Check if a file path is a role task file (not a playbook).
+    
+    Args:
+        file_path: Path to check.
+        
+    Returns:
+        True if the file appears to be a role task file, False otherwise.
+    """
+    file_path = Path(file_path).resolve()
+    parts = file_path.parts
+    
+    # Check if path contains roles/*/tasks/ or roles/*/handlers/
+    if "roles" in parts:
+        roles_idx = parts.index("roles")
+        if roles_idx + 1 < len(parts):
+            # Check if it's in tasks/ or handlers/ subdirectory
+            if "tasks" in parts or "handlers" in parts:
+                return True
+    
+    # Also check if the file content is a list of tasks (not a playbook)
+    # This is a heuristic - playbooks typically have "hosts" or are dicts with "tasks"
+    try:
+        import yaml
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = yaml.safe_load(f)
+        
+        # If it's a list and first item doesn't have "hosts" or "tasks" key, it's likely a task file
+        if isinstance(content, list) and content:
+            first_item = content[0]
+            if isinstance(first_item, dict):
+                if "hosts" not in first_item and "tasks" not in first_item and "roles" not in first_item:
+                    # Likely a task file (list of tasks)
+                    return True
+    except Exception:
+        # If we can't read/parse, assume it's not a task file
+        pass
+    
+    return False
+
+
 @cli.command()
 @click.option(
     "--dependency-map",
@@ -97,47 +138,6 @@ def cli():
     is_flag=True,
     help="Output validation errors in JSON format (only if validation fails).",
 )
-def _is_task_file(file_path: Path) -> bool:
-    """Check if a file path is a role task file (not a playbook).
-    
-    Args:
-        file_path: Path to check.
-        
-    Returns:
-        True if the file appears to be a role task file, False otherwise.
-    """
-    file_path = Path(file_path).resolve()
-    parts = file_path.parts
-    
-    # Check if path contains roles/*/tasks/ or roles/*/handlers/
-    if "roles" in parts:
-        roles_idx = parts.index("roles")
-        if roles_idx + 1 < len(parts):
-            # Check if it's in tasks/ or handlers/ subdirectory
-            if "tasks" in parts or "handlers" in parts:
-                return True
-    
-    # Also check if the file content is a list of tasks (not a playbook)
-    # This is a heuristic - playbooks typically have "hosts" or are dicts with "tasks"
-    try:
-        import yaml
-        with open(file_path, "r", encoding="utf-8") as f:
-            content = yaml.safe_load(f)
-        
-        # If it's a list and first item doesn't have "hosts" or "tasks" key, it's likely a task file
-        if isinstance(content, list) and content:
-            first_item = content[0]
-            if isinstance(first_item, dict):
-                if "hosts" not in first_item and "tasks" not in first_item and "roles" not in first_item:
-                    # Likely a task file (list of tasks)
-                    return True
-    except Exception:
-        # If we can't read/parse, assume it's not a task file
-        pass
-    
-    return False
-
-
 def analyze(
     dependency_map: Optional[Path],
     from_commit: Optional[str],
