@@ -69,6 +69,14 @@ class DependencyErrorReport:
         import json
 
         return json.dumps(self.to_dict(), indent=indent)
+    
+    def has_errors(self) -> bool:
+        """Check if the error report contains any errors.
+
+        Returns:
+            True if errors exist, False otherwise.
+        """
+        return self.total_errors > 0
 
 
 class DependencyErrorCollector:
