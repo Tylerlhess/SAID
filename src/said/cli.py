@@ -1062,8 +1062,26 @@ def build(
             from said.error_collector import DependencyError, DependencyErrorReport
             from said.error_parser import structure_dependency_error
             
-            # Try to parse and structure the error
-            structured = structure_dependency_error(str(e), type(e).__name__)
+            # Get error context if available
+            error_context = getattr(e, "error_context", {})
+            dependency_map = error_context.get("temp_dependency_map")
+            known_vars = error_context.get("known_variables")
+            
+            # Determine search base
+            search_base = None
+            if playbook_paths:
+                search_base = Path(playbook_paths[0]).parent
+            elif directory:
+                search_base = Path(directory)
+            
+            # Try to parse and structure the error with variable analysis
+            structured = structure_dependency_error(
+                str(e),
+                type(e).__name__,
+                dependency_map=dependency_map,
+                search_base=search_base,
+                known_variables=known_vars,
+            )
             
             # If it's a dependency error, use the structured format
             if structured["error_type"] == "invalid_dependency":

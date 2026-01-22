@@ -80,25 +80,37 @@ def build_producers_dictionary(
 
     # Build a reverse map: for each task, what variables might it produce?
     # We can infer this from:
-    # 1. Tasks that other tasks depend on (they might produce variables)
-    # 2. Tasks with "provides" that match variable names
+    # 1. Tasks with "provides" that match variable names (explicit variable production)
+    # 2. Tasks that are in depends_on relationships (they might register variables used by others)
+    # 3. All variables that tasks require - some might be produced by other tasks
     task_to_variables: Dict[str, Set[str]] = {}
+    
+    # First, check if tasks explicitly provide variables (in their provides list)
     for task in dependency_map.tasks:
-        # Check if task's "provides" includes variable-like names
         for provided in task.provides:
             # If provided looks like a variable name (not a resource name)
             if provided and not provided.startswith("_"):
                 if task.name not in task_to_variables:
                     task_to_variables[task.name] = set()
                 task_to_variables[task.name].add(provided)
+    
+    # Note: We can't easily detect which tasks register variables without re-parsing
+    # the original playbooks. The infer_dependencies_from_playbook function tracks this
+    # but doesn't store it in task metadata. For now, we rely on:
+    # 1. Variables explicitly in task.provides
+    # 2. Variables found in files (group_vars, host_vars, etc.)
+    # 3. Known variables from inventory
+
+    # Get all unique variables from all tasks (both required and potentially produced)
+    all_variables = set()
+    for task in dependency_map.tasks:
+        all_variables.update(task.requires_vars)
+    # Also add variables that tasks might produce
+    for variables in task_to_variables.values():
+        all_variables.update(variables)
 
     # Search for variables in files if search_base provided
     if search_base:
-        # Get all unique variables from all tasks
-        all_variables = set()
-        for task in dependency_map.tasks:
-            all_variables.update(task.requires_vars)
-
         # Search for each variable in files
         for var_name in all_variables:
             suggestions = find_variable_suggestions(var_name, search_base)

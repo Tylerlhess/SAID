@@ -18,7 +18,16 @@ from said.schema import DependencyMap, SchemaError, TaskMetadata, validate_depen
 class BuilderError(Exception):
     """Base exception for builder errors."""
 
-    pass
+    def __init__(self, message: str, error_context: Optional[Dict] = None):
+        """Initialize builder error with optional context.
+
+        Args:
+            message: Error message.
+            error_context: Optional dictionary with context for error enhancement
+                         (e.g., tasks, dependency_map, known_variables).
+        """
+        super().__init__(message)
+        self.error_context = error_context or {}
 
 
 def analyze_ansible_task(task: Dict, playbook_path: Path) -> Optional[Dict]:
@@ -176,6 +185,23 @@ def analyze_ansible_task(task: Dict, playbook_path: Path) -> Optional[Dict]:
         "watch_files": sorted(list(watch_files)) if watch_files else [],
         "requires_vars": sorted(list(requires_vars)) if requires_vars else [],
     }
+    
+    # Track register and set_fact information for variable production analysis
+    # Store this in a way that can be used later (we'll add it to provides if it's a variable)
+    if "register" in task:
+        reg_var = task["register"]
+        # Add registered variable to provides so it can be tracked
+        result["provides"].append(reg_var)
+    
+    # Track set_fact variables
+    for set_fact_key in ["set_fact", "ansible.builtin.set_fact", "ansible.legacy.set_fact"]:
+        if set_fact_key in task:
+            set_fact_dict = task[set_fact_key]
+            if isinstance(set_fact_dict, dict):
+                # set_fact can set multiple variables - add them to provides
+                for var_name in set_fact_dict.keys():
+                    result["provides"].append(var_name)
+            break
 
     # Extract dependencies from when conditions
     if "when" in task:
@@ -708,10 +734,50 @@ def build_dependency_map_from_playbooks(
         print(f"Tasks after deduplication: {len(unique_tasks)}")
 
     # Build dependency map
+    # Create a temporary dependency map from tasks for error analysis (even if validation fails)
+    temp_dependency_map = None
     try:
+        # Try to create dependency map from tasks (may fail validation)
         dependency_map = validate_dependency_map({"tasks": unique_tasks})
     except SchemaError as e:
-        raise BuilderError(f"Invalid dependency map structure: {e}")
+        # If validation fails, create a partial dependency map for error analysis
+        # This allows us to analyze variables even when validation fails
+        from said.schema import TaskMetadata
+        try:
+            # Create TaskMetadata objects without validation
+            temp_tasks = []
+            for task_dict in unique_tasks:
+                try:
+                    temp_tasks.append(TaskMetadata(**task_dict))
+                except Exception:
+                    # Skip tasks that can't be created
+                    pass
+            
+            # Create DependencyMap without calling __post_init__ (which does validation)
+            from said.schema import DependencyMap
+            temp_dependency_map = object.__new__(DependencyMap)
+            temp_dependency_map.tasks = temp_tasks
+        except Exception:
+            # If we can't even create the temp map, just raise the original error
+            temp_dependency_map = None
+        
+        # Extract register information from original task analysis
+        # This helps identify which tasks produce which variables
+        registered_vars_map = {}  # var_name -> task_name
+        if temp_dependency_map:
+            # Re-analyze to find register statements (we need the original playbook tasks)
+            # For now, we'll rely on the variable dependency analyzer to find variables
+            # But we can enhance this later if needed
+            pass
+        
+        # Store context for error enhancement
+        error_context = {
+            "tasks": unique_tasks,
+            "temp_dependency_map": temp_dependency_map,
+            "known_variables": known_variables,
+            "registered_vars": registered_vars_map,
+        }
+        raise BuilderError(f"Invalid dependency map structure: {e}", error_context=error_context)
 
     # Write to file if requested
     if output_path:
