@@ -97,6 +97,47 @@ def cli():
     is_flag=True,
     help="Output validation errors in JSON format (only if validation fails).",
 )
+def _is_task_file(file_path: Path) -> bool:
+    """Check if a file path is a role task file (not a playbook).
+    
+    Args:
+        file_path: Path to check.
+        
+    Returns:
+        True if the file appears to be a role task file, False otherwise.
+    """
+    file_path = Path(file_path).resolve()
+    parts = file_path.parts
+    
+    # Check if path contains roles/*/tasks/ or roles/*/handlers/
+    if "roles" in parts:
+        roles_idx = parts.index("roles")
+        if roles_idx + 1 < len(parts):
+            # Check if it's in tasks/ or handlers/ subdirectory
+            if "tasks" in parts or "handlers" in parts:
+                return True
+    
+    # Also check if the file content is a list of tasks (not a playbook)
+    # This is a heuristic - playbooks typically have "hosts" or are dicts with "tasks"
+    try:
+        import yaml
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = yaml.safe_load(f)
+        
+        # If it's a list and first item doesn't have "hosts" or "tasks" key, it's likely a task file
+        if isinstance(content, list) and content:
+            first_item = content[0]
+            if isinstance(first_item, dict):
+                if "hosts" not in first_item and "tasks" not in first_item and "roles" not in first_item:
+                    # Likely a task file (list of tasks)
+                    return True
+    except Exception:
+        # If we can't read/parse, assume it's not a task file
+        pass
+    
+    return False
+
+
 def analyze(
     dependency_map: Optional[Path],
     from_commit: Optional[str],
@@ -114,6 +155,51 @@ def analyze(
     This command shows what would be executed based on the current git state
     and dependency map, but does not run Ansible.
     """
+    # Validate that playbook is not a task file
+    if _is_task_file(playbook):
+        # Try to extract role name for better error message
+        role_name = None
+        playbook_path = Path(playbook).resolve()
+        parts = playbook_path.parts
+        if "roles" in parts:
+            roles_idx = parts.index("roles")
+            if roles_idx + 1 < len(parts):
+                role_name = parts[roles_idx + 1]
+        
+        error_msg = (
+            f"Error: '{playbook}' is a role task file, not a playbook.\n"
+            "Task files cannot be executed directly with ansible-playbook.\n\n"
+            "To analyze/execute tasks from this role:\n"
+            "  1. Use a playbook that includes this role, e.g.:\n"
+            f"     said analyze -p playbook.yml" + (f" --inventory {inventory}" if inventory else "") + "\n"
+            "  2. Ensure your playbook includes the role, e.g.:\n"
+            f"     - hosts: all\n"
+            f"       roles:\n"
+            f"         - {role_name if role_name else 'your_role_name'}\n"
+        )
+        if json_errors or output_json:
+            from said.error_collector import DependencyError, DependencyErrorReport
+            error_report = DependencyErrorReport(
+                errors=[
+                    DependencyError(
+                        error_type="invalid_playbook",
+                        task_name="analyze",
+                        message=error_msg,
+                        details={
+                            "file_path": str(playbook),
+                            "role_name": role_name,
+                            "suggestion": "Use a playbook file that includes this role instead of the task file directly.",
+                        },
+                    )
+                ],
+                total_errors=1,
+                error_summary={"invalid_playbook": 1},
+            )
+            click.echo(error_report.to_json())
+        else:
+            click.echo(error_msg, err=True)
+        sys.exit(1)
+    
     try:
         coordinator = WorkflowCoordinator(
             repo_path=str(repo_path) if repo_path else None,
@@ -361,6 +447,51 @@ def execute(
     the generated Ansible command. After successful execution, updates the
     state store with the current commit.
     """
+    # Validate that playbook is not a task file
+    if _is_task_file(playbook):
+        # Try to extract role name for better error message
+        role_name = None
+        playbook_path = Path(playbook).resolve()
+        parts = playbook_path.parts
+        if "roles" in parts:
+            roles_idx = parts.index("roles")
+            if roles_idx + 1 < len(parts):
+                role_name = parts[roles_idx + 1]
+        
+        error_msg = (
+            f"Error: '{playbook}' is a role task file, not a playbook.\n"
+            "Task files cannot be executed directly with ansible-playbook.\n\n"
+            "To analyze/execute tasks from this role:\n"
+            "  1. Use a playbook that includes this role, e.g.:\n"
+            f"     said execute -p playbook.yml" + (f" --inventory {inventory}" if inventory else "") + "\n"
+            "  2. Ensure your playbook includes the role, e.g.:\n"
+            f"     - hosts: all\n"
+            f"       roles:\n"
+            f"         - {role_name if role_name else 'your_role_name'}\n"
+        )
+        if json_errors:
+            from said.error_collector import DependencyError, DependencyErrorReport
+            error_report = DependencyErrorReport(
+                errors=[
+                    DependencyError(
+                        error_type="invalid_playbook",
+                        task_name="execute",
+                        message=error_msg,
+                        details={
+                            "file_path": str(playbook),
+                            "role_name": role_name,
+                            "suggestion": "Use a playbook file that includes this role instead of the task file directly.",
+                        },
+                    )
+                ],
+                total_errors=1,
+                error_summary={"invalid_playbook": 1},
+            )
+            click.echo(error_report.to_json())
+        else:
+            click.echo(error_msg, err=True)
+        sys.exit(1)
+    
     try:
         coordinator = WorkflowCoordinator(
             repo_path=str(repo_path) if repo_path else None,
