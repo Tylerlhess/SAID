@@ -37,6 +37,47 @@ def cli():
     pass
 
 
+def _find_roles_directory(playbook_path: Path, inventory_path: Optional[Path] = None) -> Optional[Path]:
+    """Find the roles directory relative to playbook or inventory.
+    
+    Searches in common locations:
+    - {playbook_dir}/../roles/
+    - {playbook_dir}/roles/
+    - {inventory_dir}/../roles/
+    - {inventory_dir}/roles/
+    - ./roles/
+    
+    Args:
+        playbook_path: Path to the playbook file.
+        inventory_path: Optional path to inventory file.
+        
+    Returns:
+        Path to roles directory if found, None otherwise.
+    """
+    playbook_dir = Path(playbook_path).parent.resolve()
+    
+    search_paths = [
+        playbook_dir.parent / "roles",  # ../roles from playbook
+        playbook_dir / "roles",  # roles/ in playbook directory
+        Path("roles"),  # ./roles from current directory
+        Path(".") / "roles",  # ./roles
+    ]
+    
+    # Add inventory-based paths if inventory is provided
+    if inventory_path:
+        inventory_dir = Path(inventory_path).parent.resolve()
+        search_paths.extend([
+            inventory_dir.parent / "roles",  # ../roles from inventory
+            inventory_dir / "roles",  # roles/ in inventory directory
+        ])
+    
+    for search_path in search_paths:
+        if search_path.exists() and search_path.is_dir():
+            return search_path.resolve()
+    
+    return None
+
+
 def _is_task_file(file_path: Path) -> bool:
     """Check if a file path is a role task file (not a playbook).
     
@@ -597,13 +638,31 @@ def execute(
 
         # Execute command
         import subprocess
+        import os
 
         if not json_errors:
             click.echo("\nExecuting Ansible command...")
+        
+        # Find roles directory and set ANSIBLE_ROLES_PATH if found
+        env = os.environ.copy()
+        roles_dir = _find_roles_directory(playbook, inventory)
+        if roles_dir:
+            # ANSIBLE_ROLES_PATH can contain multiple paths separated by colon (Unix) or semicolon (Windows)
+            separator = ":" if os.name != "nt" else ";"
+            existing_paths = env.get("ANSIBLE_ROLES_PATH", "")
+            if existing_paths:
+                new_paths = f"{existing_paths}{separator}{roles_dir}"
+            else:
+                new_paths = str(roles_dir)
+            env["ANSIBLE_ROLES_PATH"] = new_paths
+            if not json_errors:
+                click.echo(f"Using roles directory: {roles_dir}")
+        
         try:
             exit_code = subprocess.run(
                 result["command"],
                 check=False,
+                env=env,
             ).returncode
 
             if exit_code == 0:
